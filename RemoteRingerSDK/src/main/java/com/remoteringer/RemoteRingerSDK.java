@@ -483,8 +483,8 @@ public class RemoteRingerSDK {
      * @param doorLockbleMacId      The BLE MAC ID to set
      * @param callback      The callback for operation result
      */
-    public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String doorLockbleMacId, int onBoardingType, RingerCallbacks.OnboardingCallback callback) {
-        deviceSettingsManager.RemoteRinger_Onboarding(doorLockId, encryptionKey, doorLockbleMacId, onBoardingType, callback);
+    public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String doorLockbleMacId, int doorLockUnitType, RingerCallbacks.OnboardingCallback callback) {
+        deviceSettingsManager.RemoteRinger_Onboarding(doorLockId, encryptionKey, doorLockbleMacId, doorLockUnitType, callback);
     }
 
     /**

@@ -1549,12 +1549,12 @@ public class MainActivity extends AppCompatActivity {
     /**
      * **🔹  OnBoarding **
      */
-    private void OnBoarding(int onBoardingType) {
+    private void OnBoarding(int doorlockUnitType) {
            String doorLockId= edtsetDoorLockId.getText().toString();
            String encryptionKey= edtsetDoorLockSecretKey.getText().toString();
            String macId= edtsetDoorLockBleAddress.getText().toString();
 
-        remoteRingerSDK.RemoteRinger_Onboarding(doorLockId, encryptionKey, macId, onBoardingType,new RingerCallbacks.OnboardingCallback() {
+        remoteRingerSDK.RemoteRinger_Onboarding(doorLockId, encryptionKey, macId, doorlockUnitType,new RingerCallbacks.OnboardingCallback() {
             @Override
             public void onSuccess(String message) {
 
