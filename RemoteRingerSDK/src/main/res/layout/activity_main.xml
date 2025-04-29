@@ -350,15 +350,33 @@
 
         </LinearLayout>
 
-        <Button
-            android:id="@+id/btnWifiProvisionMode"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="5dp"
-            android:layout_marginTop="10dp"
-            android:backgroundTint="#3F51B5"
-            android:gravity="center_horizontal|center_vertical"
-            android:text="Skip Provisioning" />
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnSkipProvisioning"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="#3F51B5"
+                android:layout_weight="1"
+                android:gravity="center_horizontal|center_vertical"
+                android:text="Skip Provisioning" />
+            <Button
+                android:id="@+id/btnReProvisioning"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="#3F51B5"
+                android:layout_weight="1"
+                android:gravity="center_horizontal|center_vertical"
+                android:text="Re Provisioning" />
+        </LinearLayout>
+
 
 
         <TextView

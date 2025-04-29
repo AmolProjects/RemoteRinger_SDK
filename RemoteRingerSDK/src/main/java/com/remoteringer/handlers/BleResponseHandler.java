@@ -51,6 +51,7 @@ public class BleResponseHandler {
     private RingerCallbacks.OtaProgressCallback otaCallback;
     private RingerCallbacks.OnboardingCallback onboardingCallback;
     private RingerCallbacks.ProvisionCallback provisionCallback;
+    private RingerCallbacks.ReProvisionCallBack reProvisionCallBack;
     private Handler timeoutHandler = new Handler(Looper.getMainLooper());
     private Runnable timeoutRunnable;
     /**
@@ -74,6 +75,9 @@ public class BleResponseHandler {
 
     public void setProvisionCallback(RingerCallbacks.ProvisionCallback callback) {
         this.provisionCallback = callback;
+    }
+    public void setReProvisionCallback(RingerCallbacks.ReProvisionCallBack callback) {
+        this.reProvisionCallBack = callback;
     }
 
     public RingerCallbacks.OtaProgressCallback getOtaCallback() {

@@ -83,6 +83,7 @@ public class DeviceSettingsManager {
     private RingerCallbacks.DeviceModelCallback deviceModelCallback;
     public static boolean isOtaUpdatePending = false;
     private RingerCallbacks.VolumeLevelCallback volumelevelCallback;
+    public static Integer reProvisionMode;
     private  RingerCallbacks.BootModeCallback getBootModeCallback;
     static {
         errorMap.put("ERR01", "Wrong command code");
@@ -415,6 +416,160 @@ public class DeviceSettingsManager {
             callback.onSuccess("OTA control done sent.");
         }
     }
+
+
+    /**
+     * Sets the system mode of the remote ringer device.
+     *
+     * @param callback   The callback to handle the operation results
+     */
+
+
+    public void RemoteRinger_SkipProvision( RingerCallbacks.SkipProvisionCallBack callback) {
+
+        byte[] payload = RemoteRingerCommand.setSingleByteCommand(setSystemProvisionMode);
+        byte[] frame = buildCommandFrame(setSystemModeCommand, payload);
+        commandCallbackMap.put(setSystemModeCommand, callback);
+
+
+        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
+            @Override
+            public void onSuccess(String message) {
+                // You could trigger timeout/failure logic here if needed
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setSystemModeCommand);
+                if (cb != null) cb.onError(errorMessage);
+            }
+        }, "RemoteRinger_setSkipProvisionSystemMode");
+
+    }
+
+    /**
+     * Performs RemoteRinger_reProvision.
+     * @param ssid    The door lock ID to set
+     * @param password The encryption key to set
+     * @param callback      The callback to handle the operation results
+     */
+
+    public void RemoteRinger_ReProvision(String ssid, String password, RingerCallbacks.ReProvisionCallBack callback) {
+
+        bleResponseHandler.setReProvisionCallback(callback);
+
+        RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
+            @Override
+            public void onSuccess(String systemMode) {
+                reProvisionMode= Integer.valueOf(systemMode);
+                Log.d(TAG, "Fetched System Boot Mode: " + reProvisionMode);
+
+                // Step 2: Now decide based on value of systemMode
+                if (!"2".equals(systemMode)) {
+                    // Not in mode 2, so set it first
+                    RemoteRinger_setSystemMode(2, new RingerCallbacks.SystemModeCallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            Log.d(TAG, "System mode set to 2: " + message);
+                            setWiFiCredentials_ReProvision(callback, ssid, password);
+                        }
+
+                        @Override
+                        public void onError(String errorMessage) {
+                            Log.e(TAG, "Failed to set system mode: " + errorMessage);
+                            callback.onError("Failed at System Mode: " + errorMessage);
+                        }
+                    });
+                } else {
+                    Log.d(TAG, "System already in mode 2. Proceeding to set WiFi credentials...");
+                    setWiFiCredentials_ReProvision(callback, ssid, password);
+                }
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to get system mode: " + errorMessage);
+                callback.onError("Failed to get System Mode: " + errorMessage);
+            }
+        });
+
+    }
+    private void setWiFiCredentials_ReProvision(RingerCallbacks.ReProvisionCallBack callback, String ssid, String password) {
+        RemoteRinger_setWifiSsid(ssid, new RingerCallbacks.WiFiSSIDCallback() {
+            @Override
+            public void onSuccess(String message) {
+                Log.d(TAG, "SSID set successfully: " + message);
+
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    RemoteRinger_setWifiPass(password, new RingerCallbacks.WifiPasswordcallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            Log.d(TAG, "WiFi Password set successfully: " + message);
+
+                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                RemoteRinger_wifiActivation(1, new RingerCallbacks.WifiActivationCallback() {
+                                    @Override
+                                    public void onSuccess(String message) {
+                                        // Log.d(TAG, "WiFi Activated: " + message);
+                                        //callback.onSuccess("Wifi Credentials Set Successfully!");
+                                        if(reProvisionMode>2) {
+                                            RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
+                                                @Override
+                                                public void onSuccess(String message) {
+                                                    callback.onSuccess("ReProvision Done");
+                                                }
+
+                                                @Override
+                                                public void onError(String errorMessage) {
+
+                                                }
+                                            });
+                                        }else{
+                                            callback.onSuccess("ReProvision is not allowed");
+                                        }
+                                    }
+
+                                    @Override
+                                    public void onError(String errorMessage) {
+                                        //Log.e(TAG, "Failed to activate WiFi: " + errorMessage);
+                                        // callback.onError("WiFi Activation Failed: " + errorMessage);
+                                        if(reProvisionMode>2) {
+                                            RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
+                                                @Override
+                                                public void onSuccess(String message) {
+                                                    callback.onSuccess("ReProvision Done");
+                                                }
+
+                                                @Override
+                                                public void onError(String errorMessage) {
+
+                                                }
+                                            });
+                                        }else{
+                                            callback.onSuccess("Retain State is not allowed");
+                                        }
+                                    }
+                                });
+                            }, 1000);
+                        }
+
+                        @Override
+                        public void onError(String errorMessage) {
+                            // Log.e(TAG, "Failed to set WiFi password: " + errorMessage);
+                            // callback.onError("Failed to set WiFi Password: " + errorMessage);
+                        }
+                    });
+                }, 1000);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to set SSID: " + errorMessage);
+                callback.onError("Failed to set SSID: " + errorMessage);
+            }
+        });
+    }
+
 
     /**
      * **🔹  String convert into the integer value   **

@@ -20,6 +20,20 @@ public class RingerCallbacks {
 
         void onPairingFailed(BluetoothDevice device);
     }
+    /**
+     * Callback interface for handling responses from the RemoteRinger SystemMode.
+     */
+    public interface SkipProvisionCallBack extends BaseCallback {
+        void onSuccess(String message);
+        void onError(String errorMessage);
+    }
+    /**
+     * Callback interface for handling responses from the RemoteRinger SystemMode.
+     */
+    public interface ReProvisionCallBack extends BaseCallback {
+        void onSuccess(String message);
+        void onError(String errorMessage);
+    }
 
     // Callback for Bluetooth device pairing
     public interface ToneCallback {

@@ -97,6 +97,25 @@ public class RemoteRingerSDK {
         deviceSettingsManager.RemoteRinger_setSystemMode(systemMode, callback);
     }
 
+    /**
+     * Sets the system mode on the connected device.
+     *
+     * @param callback   The callback for operation result
+     */
+    public void RemoteRinger_SkipProvision( RingerCallbacks.SkipProvisionCallBack callback) {
+        deviceSettingsManager.RemoteRinger_SkipProvision( callback);
+    }
+    /**
+     * Provisions WiFi settings on the connected device.
+     *
+     * @param ssid     The WiFi SSID to provision
+     * @param password The WiFi password to provision
+     * @param callback The callback for operation result
+     */
+    public void RemoteRinger_ReProvision(String ssid, String password, RingerCallbacks.ReProvisionCallBack callback) {
+        deviceSettingsManager.RemoteRinger_ReProvision(ssid, password, callback);
+    }
+
 
 
     /**

@@ -63,7 +63,7 @@ public class MainActivity extends AppCompatActivity {
             SET_FACTORY_DEFAULT_TONE_VOLUME_LEVEL, TEST_AUDIO_TONE, PLAY_AUDIO_TONE, NEXT_AUDIO_TONE, PREV_AUDIO_TONE,
             STOP_AUDIO_TONE, GET_AUDIO_TONE, SET_AUDIO_TONE, GET_VOLUME_LEVEL, SET_VOLUME_LEVEL, INC_VOLUME_LEVEL, btNextAudioTone, bt_PreviousAudioTone,
             DEC_VOLUME_LEVEL, btCurrentToneID, bt_PreviewAudioTone, btnDisConnect, btnMobileAuth, btnMobileUnAuth, btnSetWifiSsid, btnGetWifiSsid, btnSetWifiPass, btnWifiActivation, btnWifiProvisionMode, btnsetDoorLockId, btnsetDoorLockBleAddress, btnsetDoorLockSecretKey, btnsetDoorLockBleActivation, btnOnBoardingSuccess, btnOperationalMode,
-            btngrpWifiProvision, Play_Melody_list,Play_Melody, btngrpOnBoarding, GET_DEVICE_INFO, btnSetSystemMode1, btStartOtaUpdate,btnAbortOtaUpdate;
+            btngrpWifiProvision, Play_Melody_list,Play_Melody, btngrpOnBoarding, GET_DEVICE_INFO,btnSkipProvisioning,btnReProvisioning, btnSetSystemMode1, btStartOtaUpdate,btnAbortOtaUpdate;
     ProgressBar otaProgressBar;
     TextView otaProgressText;
     private DeviceListAdapter deviceListAdapter;
@@ -151,7 +151,9 @@ public class MainActivity extends AppCompatActivity {
         // :::::::::::  Mobile Auth ::::::::::::
         btnMobileAuth.setOnClickListener(v -> mobileAuth());
         // :::::::::::  set system mode ::::::::::::
-        btnSetSystemMode.setOnClickListener(v -> setSystemMode());
+       // btnSetSystemMode.setOnClickListener(v -> setSystemMode());
+        // :::::::::::   skip_Provision ::::::::::::
+        btnSkipProvisioning.setOnClickListener(v -> skipProvisionBoarding());
         //set factory out
         btnSetSystemMode1.setOnClickListener(v -> setSystemMode1());
 
@@ -172,7 +174,7 @@ public class MainActivity extends AppCompatActivity {
         // :::::::::::   Wifi Activation ::::::::::::
         btnMobileUnAuth.setOnClickListener(v -> mobileUnAuth());
         // :::::::::::   set setSystemProvisionModeBoarding ::::::::::::
-        btnWifiProvisionMode.setOnClickListener(v -> setSystemProvisionModeBoarding());
+       // btnWifiProvisionMode.setOnClickListener(v -> setSystemProvisionModeBoarding());
         // :::::::::::   set Serial Number:::::::::::
         btnSetSerialNumber.setOnClickListener(v -> setSerialNumber());
         // :::::::::::   Get Serial Number:::::::::::
@@ -236,6 +238,34 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
             }
+        });
+        // :::::::::::   Re_Provision ::::::::::::
+
+        btnReProvisioning.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String wifiName1 = edtsetWifiSsid.getText().toString();
+                String password1 = edtsetWifiPassword.getText().toString();
+                remoteRingerSDK.RemoteRinger_ReProvision(wifiName1, password1, new RingerCallbacks.ReProvisionCallBack() {
+                    @Override
+                    public void onSuccess(String message) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this, "ReProvision State Main: " +message, Toast.LENGTH_SHORT).show();
+                            Log.d(TAG, message);
+                        });
+                    }
+
+                    @Override
+                    public void onError(String errorMessage) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this,  errorMessage, Toast.LENGTH_SHORT).show();
+                            Log.d(TAG, errorMessage);
+                        });
+
+                    }
+                });
+            }
+
         });
         // :::::::::::  Decrement volume level ::::::::::::
         DEC_VOLUME_LEVEL.setOnClickListener(v -> decrementVolumeLevel());
@@ -308,7 +338,8 @@ public class MainActivity extends AppCompatActivity {
         btnSetWifiPass = findViewById(R.id.btnSetWifiPass);
         Play_Melody=findViewById(R.id.Play_Melody);
         btnWifiActivation = findViewById(R.id.btnWifiActivation);
-        btnWifiProvisionMode = findViewById(R.id.btnWifiProvisionMode);
+        btnReProvisioning=findViewById(R.id.btnReProvisioning);
+        btnSkipProvisioning = findViewById(R.id.btnSkipProvisioning);
         btnsetDoorLockId = findViewById(R.id.btnsetDoorLockId);
         btnsetDoorLockBleAddress = findViewById(R.id.btnsetDoorLockBleAddress);
         btnsetDoorLockSecretKey = findViewById(R.id.btnsetDoorLockSecretKey);
@@ -386,6 +417,32 @@ public class MainActivity extends AppCompatActivity {
         // Set up device list adapter
         deviceListAdapter = new DeviceListAdapter(this);
         listViewDevices.setAdapter(deviceListAdapter);
+    }
+
+    /**
+     * **🔹 set skip provision**
+     */
+    private void skipProvisionBoarding() {
+
+        Log.e(TAG, "Input RemoteRinger_SkipProvision:::::::" + setSystemProvisionMode);
+        remoteRingerSDK.RemoteRinger_SkipProvision(new RingerCallbacks.SkipProvisionCallBack() {
+            @Override
+            public void onSuccess(String message) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "SkipProvision mode success : " +message, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, message);
+                });
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "SkipProvision Mode error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, errorMessage);
+                });
+            }
+        });
+
     }
 
     /**
@@ -657,9 +714,9 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /**
+  /*  *//**
      * **🔹 set System Mode 2**
-     */
+     *//*
     private void setSystemMode() {
         Log.e(TAG, "Input setSystemMode:::::::" + setSystemMode);
         remoteRingerSDK.RemoteRinger_setSystemMode(setSystemMode, new RingerCallbacks.SystemModeCallback() {
@@ -678,7 +735,7 @@ public class MainActivity extends AppCompatActivity {
 
             }
         });
-    }
+    }*/
 
     private void setSystemMode1() {
         
