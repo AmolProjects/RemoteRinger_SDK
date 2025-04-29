@@ -31,6 +31,16 @@ public abstract class RemoteRingerCommand {
     }
 
     /**
+     * set the input form user one argument which value for 1 byte and type for 1 byte.
+     */
+    public static byte[] setSingleByteCommandType(int value, int type) {
+        if (value < 0 || value > 255 || type < 0 || type > 255) {
+            throw new IllegalArgumentException("Value and Type must be between 0 and 255.");
+        }
+        return new byte[]{(byte) value, (byte) type};  // Two bytes: value and type
+    }
+
+    /**
      * set the input form user one argument which value for two byte.
      */
     public static byte[] setTwoByteCommand(int value) {

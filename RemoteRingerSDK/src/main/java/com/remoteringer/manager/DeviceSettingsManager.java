@@ -103,6 +103,7 @@ public class DeviceSettingsManager {
         errorMap.put("ERR16", "Duplicate Request ID");
         errorMap.put("ERR17", "Tone IC is Not Responding");
         errorMap.put("ERR18", "Tone IC Busy");
+        errorMap.put("ERR19", "WiFI not Configured");
 //        errorMap.put(" private static DeviceSettingsManager instance;ERR17", "Tone IC not responding");
     }
 
@@ -1098,8 +1099,10 @@ public class DeviceSettingsManager {
      * @param callback       The callback to handle the operation results
      */
 
-    public void RemoteRinger_setOnBoardingActivation(int onBoardingMode, RingerCallbacks.OnBoardingActivationCallback callback) {
-        byte[] payload = RemoteRingerCommand.setSingleByteCommand(onBoardingMode);
+    public void RemoteRinger_setOnBoardingActivation(int onBoardingMode, int onBoardingType,  RingerCallbacks.OnBoardingActivationCallback callback) {
+        Constant_Variable.getOnBoardingType = onBoardingType;
+        Log.d(TAG, "onBoardingType DeviceSettingManager: " + onBoardingType);
+        byte[] payload = RemoteRingerCommand.setSingleByteCommandType(onBoardingMode,onBoardingType);
         byte[] frame = buildCommandFrame(onBoardingActivationCommand, payload);
 
         commandCallbackMap.put(onBoardingActivationCommand, callback);
@@ -2061,8 +2064,9 @@ public class DeviceSettingsManager {
 
 
 
-    public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String bleMacId, RingerCallbacks.OnboardingCallback callback) {
-
+    public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String bleMacId, int onBoardingType, RingerCallbacks.OnboardingCallback callback) {
+        Constant_Variable.getOnBoardingType = onBoardingType;
+        Log.d(TAG, "RemoteRinger_Onboarding called : " + onBoardingType);
         // Step 1: First fetch current system mode
         RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
             @Override
@@ -2075,7 +2079,7 @@ public class DeviceSettingsManager {
                         @Override
                         public void onSuccess(String message) {
                             Log.d(TAG, "System mode set to 3: " + message);
-                            performOnboarding(doorLockId, encryptionKey, bleMacId, callback);
+                            performOnboarding(doorLockId, encryptionKey, bleMacId, onBoardingType,callback);
                         }
 
                         @Override
@@ -2086,7 +2090,7 @@ public class DeviceSettingsManager {
                     });
                 } else {
                     Log.d(TAG, "System already in mode 3. Proceeding to onboarding...");
-                    performOnboarding(doorLockId, encryptionKey, bleMacId, callback);
+                    performOnboarding(doorLockId, encryptionKey, bleMacId, onBoardingType,callback);
                 }
             }
 
@@ -2098,7 +2102,7 @@ public class DeviceSettingsManager {
         });
     }
 
-    private void performOnboarding(String doorLockId, String encryptionKey, String bleMacId, RingerCallbacks.OnboardingCallback callback) {
+    private void performOnboarding(String doorLockId, String encryptionKey, String bleMacId, int onBoardingType,RingerCallbacks.OnboardingCallback callback) {
         bleResponseHandler.startOnboardingTimeout();
         bleResponseHandler.setOnboardingCallback(callback);
 
@@ -2120,7 +2124,7 @@ public class DeviceSettingsManager {
                                         Log.d(TAG, "BLE MAC ID Set: " + message);
                                         new Handler(Looper.getMainLooper()).postDelayed(() -> {
 
-                                            RemoteRinger_setOnBoardingActivation(1, new RingerCallbacks.OnBoardingActivationCallback() {
+                                            RemoteRinger_setOnBoardingActivation(1,onBoardingType, new RingerCallbacks.OnBoardingActivationCallback() {
                                                 @Override
                                                 public void onSuccess(String message) {
                                                     Log.d(TAG, "Onboarding Activation Started: " + message);

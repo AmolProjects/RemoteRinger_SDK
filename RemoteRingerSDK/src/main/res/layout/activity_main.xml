@@ -439,7 +439,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:hint="Set Door Secret Key "
-                android:text="000000000000000000000000000000"
+                android:text="Qn5qd7i80vQvM0KFQLy0Qn5qd7i80Fco"
 
                 />
 
@@ -486,6 +486,14 @@
             android:gravity="center_horizontal|center_vertical"
             android:text="On Boarding Success"
             android:visibility="gone" />
+
+        <Spinner
+            android:id="@+id/spinnerDoorLockType"
+            android:layout_width="match_parent"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="10dp"
+            android:padding="5dp"
+            android:layout_height="wrap_content"/>
 
         <Button
             android:id="@+id/btngrpOnBoarding"

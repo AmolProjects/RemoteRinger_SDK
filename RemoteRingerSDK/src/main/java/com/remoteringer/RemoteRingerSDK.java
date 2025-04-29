@@ -246,8 +246,8 @@ public class RemoteRingerSDK {
      * @param onBoardingMode The activation mode to set
      * @param callback       The callback for operation result
      */
-    public void RemoteRinger_setOnBoardingActivation(int onBoardingMode, RingerCallbacks.OnBoardingActivationCallback callback) {
-        deviceSettingsManager.RemoteRinger_setOnBoardingActivation(onBoardingMode, callback);
+    public void RemoteRinger_setOnBoardingActivation(int onBoardingMode, int onBoardingType, RingerCallbacks.OnBoardingActivationCallback callback) {
+        deviceSettingsManager.RemoteRinger_setOnBoardingActivation(onBoardingMode, onBoardingType, callback);
     }
 
     /**
@@ -483,8 +483,8 @@ public class RemoteRingerSDK {
      * @param doorLockbleMacId      The BLE MAC ID to set
      * @param callback      The callback for operation result
      */
-    public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String doorLockbleMacId, RingerCallbacks.OnboardingCallback callback) {
-        deviceSettingsManager.RemoteRinger_Onboarding(doorLockId, encryptionKey, doorLockbleMacId, callback);
+    public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String doorLockbleMacId, int onBoardingType, RingerCallbacks.OnboardingCallback callback) {
+        deviceSettingsManager.RemoteRinger_Onboarding(doorLockId, encryptionKey, doorLockbleMacId, onBoardingType, callback);
     }
 
     /**

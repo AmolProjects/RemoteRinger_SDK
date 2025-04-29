@@ -45,6 +45,7 @@ public class Constant_Variable {
     public static int onBoardingSuccess = 5;
     public static int setMelodyId = 2;
     public static int setMelodyVolume = 1;
+    public static int getOnBoardingType;
     /**
      * **🔹  RemoteRinger_Command Code For Api **
      */

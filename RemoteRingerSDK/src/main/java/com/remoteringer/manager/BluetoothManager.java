@@ -294,6 +294,10 @@ public class BluetoothManager {
                     enableNotification(gatt, UUID.fromString("00004321-0000-1000-8000-00805f9b34fb"),
                             UUID.fromString("00003a28-0000-1000-8000-00805f9b34fb"));
 
+                    // Enable Notification for Onboarding Over WiFi
+                    enableNotification(gatt,UUID.fromString("00004321-0000-1000-8000-00805f9b34fb"),
+                            UUID.fromString("00003a29-0000-1000-8000-00805f9b34fb"));
+
                     // HOST CONNECTION OVER BLE STATUS
                     enableNotification(gatt, UUID.fromString("00004321-0000-1000-8000-00805f9b34fb"),
                             UUID.fromString("00003a2b-0000-1000-8000-00805f9b34fb"));

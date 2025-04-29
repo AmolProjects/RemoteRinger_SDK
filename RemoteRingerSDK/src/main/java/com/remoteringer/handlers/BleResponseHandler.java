@@ -44,6 +44,7 @@ public class BleResponseHandler {
     private static final UUID WiFi_Status_UUID = UUID.fromString("00003a2a-0000-1000-8000-00805f9b34fb");
     private static final UUID Provisioning_Status_UUID = UUID.fromString("00003a27-0000-1000-8000-00805f9b34fb");
     private static final UUID Onboarding_Status_UUID = UUID.fromString("00003a28-0000-1000-8000-00805f9b34fb");
+    private static final UUID Onboarding_Over_WiFi = UUID.fromString("00003a29-0000-1000-8000-00805f9b34fb");
     private static byte[] firmwareData;
     private static int asciiValue;
     private RingerCallbacks.OtaProgressCallback otaProgressCallback;
@@ -170,13 +171,54 @@ public class BleResponseHandler {
                     cancelTimeout();
                     Log.d(TAG, "✅ STATE CONNECTED received from ONBOARDING OVER BLE STATUS UUID, setting System Mode Boot to 4...");
                     shouldSetSystemMode = false; // Reset flag
-
+                    int onBoardingType = Constant_Variable.getOnBoardingType;
+                    Log.d(TAG, "✅ OnBoarding Type BleResponseHandler: " + onBoardingType);
                     // Call RemoteRinger_setSystemMode(3)
                     new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                        deviceSettingsManager.RemoteRinger_setOnBoardingActivation(7, new RingerCallbacks.OnBoardingActivationCallback() {
+                        deviceSettingsManager.RemoteRinger_setOnBoardingActivation(7,onBoardingType, new RingerCallbacks.OnBoardingActivationCallback() {
                             @Override
                             public void onSuccess(String message) {
                                 Log.d(TAG, "✅ OnBoarding Completed Successfully: " + message);
+                                //do changes here for callback
+                                onboardingCallback.onSuccess("OnBoarding Completed Successfully");
+
+                            }
+
+                            @Override
+                            public void onError(String errorMessage) {
+                                Log.e(TAG, "❌ Failed to set System Mode Boot: " + errorMessage);
+                                onboardingCallback.onError("Failed to set OnBoarding");
+                            }
+                        });
+                    }, 1000); // Add small delay before calling
+                }
+                else if (command == 3) {
+                    cancelTimeout();
+                    onboardingCallback.onError("Activation Timeout");
+
+                }
+
+
+            }
+
+            // Onboarding Over WiFi
+            else if (Onboarding_Over_WiFi.equals(characteristic.getUuid())) {
+                Log.d(TAG, "⚡ONBOARDING OVER WiFI STATUS Changed: " + getHostStatusDescription(command));
+
+                // ✅ If ACTIVATION_SUCCESS (5), we can log success or trigger another action
+                // ✅ If STATE CONNECTED (3) and provisioning is ongoing, trigger System Mode Boot
+                if (command == 6) {
+                    cancelTimeout();
+                    Log.d(TAG, "✅ STATE CONNECTED received from ONBOARDING OVER WiFi STATUS UUID, setting System Mode Boot to 4...");
+                    shouldSetSystemMode = false; // Reset flag
+                    int onBoardingType = Constant_Variable.getOnBoardingType;
+                    Log.d(TAG, "✅ OnBoarding Type BleResponseHandler: " + onBoardingType);
+                    // Call RemoteRinger_setSystemMode(3)
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        deviceSettingsManager.RemoteRinger_setOnBoardingActivation(7,onBoardingType, new RingerCallbacks.OnBoardingActivationCallback() {
+                            @Override
+                            public void onSuccess(String message) {
+                                Log.d(TAG, "✅  WiFi OnBoarding Completed Successfully: " + message);
                                 //do changes here for callback
                                 onboardingCallback.onSuccess("OnBoarding Completed Successfully");
 
@@ -806,7 +848,7 @@ public class BleResponseHandler {
             Log.e(TAG, "❌ Timeout: Device not responding for onboarding...");
             onboardingCallback.onError("Device not Responding");
         };
-        timeoutHandler.postDelayed(timeoutRunnable, 30000); // 30 seconds timeout
+        timeoutHandler.postDelayed(timeoutRunnable, 45000); // 45 seconds timeout
     }
 
     public void startProvisionTimeout() {

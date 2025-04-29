@@ -23,10 +23,12 @@ import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -40,6 +42,7 @@ import com.remoteringer.adapter.DeviceListAdapter;
 import com.remoteringer.callbacks.RingerCallbacks;
 import com.remoteringer.manager.RingerSdkManager_ApiKey;
 
+import java.util.HashMap;
 import java.util.List;
 
 
@@ -67,6 +70,19 @@ public class MainActivity extends AppCompatActivity {
     private ListView listViewDevices;
     private String selectedDeviceMac, formattedMac, bleAddress;
     private Uri selectedFileUri; // store selected file uri
+    private Spinner spinnerDoorLockType;
+    private int onBoardingType;
+
+    // Data for Spinner
+    String[] doorLockTypes = {
+            "Select Door Lock Type",   // Default (invalid) selection
+            "Door_Lock_Type_BLE",
+            "Door_Lock_Type_WiFi",
+            "Door_Lock_Type_BLE_AND_WiFi",
+            "Door_Lock_Type_BLE_Or_WiFi"
+    };
+    // Map to hold label -> value
+    HashMap<String, Integer> doorLockTypeMap = new HashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,6 +91,19 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         // init the object
         initObject();
+
+
+        // Initialize the map
+        doorLockTypeMap.put("Door_Lock_Type_BLE", 1);
+        doorLockTypeMap.put("Door_Lock_Type_WiFi", 2);
+        doorLockTypeMap.put("Door_Lock_Type_BLE_AND_WiFi", 3);
+        doorLockTypeMap.put("Door_Lock_Type_BLE_Or_WiFi", 4);
+
+        // Set up the spinner
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, doorLockTypes);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerDoorLockType.setAdapter(adapter);
 
         /**
          * **🔹  initialize And ManageSession for ble device **
@@ -239,7 +268,7 @@ public class MainActivity extends AppCompatActivity {
                 }
 
         });
-        btngrpOnBoarding.setOnClickListener(v -> OnBoarding());
+//        btngrpOnBoarding.setOnClickListener(v -> OnBoarding());
         btnDisConnect.setOnClickListener(v -> disconnectDevice());
         GET_DEVICE_INFO.setOnClickListener(v -> getDeviceInfo());
         // :::::::::::  startOtaUpdate::::::::::::
@@ -248,6 +277,23 @@ public class MainActivity extends AppCompatActivity {
         });
         btnAbortOtaUpdate.setOnClickListener(v -> RemoteRinger_AbortOtaUpdate());
 
+        btngrpOnBoarding.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                int selectedLabel = spinnerDoorLockType.getSelectedItemPosition();
+
+                if (selectedLabel == 0) {
+                    // First item is default hint, invalid selection
+                    Toast.makeText(MainActivity.this, "Please select a valid Door Lock Type", Toast.LENGTH_SHORT).show();
+                } else {
+                    // Valid selection: map to integer value 1,2,3,4
+                    onBoardingType = selectedLabel; // because options[1] = 1, etc.
+//                    Constant_Variable.onboardingType = selectedValue;  // Store globally
+                    // Proceed with logic
+                    OnBoarding(onBoardingType);
+                }
+            }
+        });
     }
 
     private void initObject() {
@@ -323,6 +369,7 @@ public class MainActivity extends AppCompatActivity {
         otaProgressBar = findViewById(R.id.otaProgressBar);
         otaProgressText = findViewById(R.id.otaProgressText);
         btnAbortOtaUpdate=findViewById(R.id.btnAbortOtaUpdate);
+        spinnerDoorLockType = findViewById(R.id.spinnerDoorLockType);
 
         // ✅ Initialize SDK with API Key
         try {
@@ -966,8 +1013,10 @@ public class MainActivity extends AppCompatActivity {
      * **🔹 Activate onBoarding**
      */
     private void setActivateOnBoarding() {
+        String selectedLabel = spinnerDoorLockType.getSelectedItem().toString();
+        onBoardingType = doorLockTypeMap.get(selectedLabel);
         Log.e(TAG, "Input setActivateOnBoarding::::::::::::::" + onBoardingActivationMode);
-        remoteRingerSDK.RemoteRinger_setOnBoardingActivation(onBoardingActivationMode, new RingerCallbacks.OnBoardingActivationCallback() {
+        remoteRingerSDK.RemoteRinger_setOnBoardingActivation(onBoardingActivationMode,onBoardingType, new RingerCallbacks.OnBoardingActivationCallback() {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
@@ -1500,12 +1549,12 @@ public class MainActivity extends AppCompatActivity {
     /**
      * **🔹  OnBoarding **
      */
-    private void OnBoarding() {
+    private void OnBoarding(int onBoardingType) {
            String doorLockId= edtsetDoorLockId.getText().toString();
            String encryptionKey= edtsetDoorLockSecretKey.getText().toString();
            String macId= edtsetDoorLockBleAddress.getText().toString();
 
-        remoteRingerSDK.RemoteRinger_Onboarding(doorLockId, encryptionKey, macId, new RingerCallbacks.OnboardingCallback() {
+        remoteRingerSDK.RemoteRinger_Onboarding(doorLockId, encryptionKey, macId, onBoardingType,new RingerCallbacks.OnboardingCallback() {
             @Override
             public void onSuccess(String message) {
 
