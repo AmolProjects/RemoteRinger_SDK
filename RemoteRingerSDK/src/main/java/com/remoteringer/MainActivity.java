@@ -8,13 +8,12 @@ import static com.remoteringer.Constant.Constant_Variable.onBoardingSuccess;
 import static com.remoteringer.Constant.Constant_Variable.patch;
 import static com.remoteringer.Constant.Constant_Variable.serialNumber;
 import static com.remoteringer.Constant.Constant_Variable.setApplicationBootMode;
-import static com.remoteringer.Constant.Constant_Variable.setSystemMode;
 import static com.remoteringer.Constant.Constant_Variable.setSystemProvisionMode;
-import static com.remoteringer.Constant.Constant_Variable.setWifiActivation;
 import static com.remoteringer.Constant.Constant_Variable.setWifiSsidName;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
@@ -28,6 +27,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -44,6 +44,7 @@ import com.remoteringer.manager.RingerSdkManager_ApiKey;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -51,28 +52,22 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int PERMISSION_REQUEST_CODE = 101;
     private static final int REQUEST_CODE_SELECT_FILE = 1;
+    public static boolean IsProvisionStatus = false;
     RingerSdkManager_ApiKey sdkManager_apiKey;
     RemoteRingerSDK remoteRingerSDK;
     Activity activity;
     int setSystemMode1 = 1;
-    EditText pickFile, setSerialNumber, edtsetWifiSsid, edtsetWifiPassword, edtsetDoorLockId, edtsetDoorLockBleAddress,
-            edtsetDoorLockSecretKey, edtsetAudioTone, edtsetVolumeLevel, edtpreviewaudiotone, edtMajor, edtMinor, edtPatch, edtDeviceModelID;
+    EditText edtSecretConnectDeviceID,pickFile, setSerialNumber, edtsetWifiSsid, edtsetWifiPassword, edtsetDoorLockId, edtsetDoorLockBleAddress,
+            edtsetDoorLockSecretKey, edtsetAudioTone, edtsetVolumeLevel, edtpreviewaudiotone, edtMajor, edtMinor, edtPatch, edtDeviceModelID,edtSecretDeviceID;
     Button btnScan, btnConnect, btnGetSerialNumber, btnSetSerialNumber, btnSetSystemMode, btnGetSystemMode, GETHardwareVersion, btnSETHardwareVersion, GETFirmwareVersion, btnSETFirmwareVersion,
             GET_APPLICATION_BOOT_MODE, SET_APPLICATION_BOOT_MODE, FACTORY_RESET, DEVICE_REBOOT,
             GET_DEVICE_MODEL_ID, SET_DEVICE_MODEL_ID, GET_DOOR_LOCK_ID, SET_DOOR_LOCK_ID, SET_FACTORY_DEFAULT_TONE_ID,
             SET_FACTORY_DEFAULT_TONE_VOLUME_LEVEL, TEST_AUDIO_TONE, PLAY_AUDIO_TONE, NEXT_AUDIO_TONE, PREV_AUDIO_TONE,
             STOP_AUDIO_TONE, GET_AUDIO_TONE, SET_AUDIO_TONE, GET_VOLUME_LEVEL, SET_VOLUME_LEVEL, INC_VOLUME_LEVEL, btNextAudioTone, bt_PreviousAudioTone,
             DEC_VOLUME_LEVEL, btCurrentToneID, bt_PreviewAudioTone, btnDisConnect, btnMobileAuth, btnMobileUnAuth, btnSetWifiSsid, btnGetWifiSsid, btnSetWifiPass, btnWifiActivation, btnWifiProvisionMode, btnsetDoorLockId, btnsetDoorLockBleAddress, btnsetDoorLockSecretKey, btnsetDoorLockBleActivation, btnOnBoardingSuccess, btnOperationalMode,
-            btngrpWifiProvision, Play_Melody_list,Play_Melody, btngrpOnBoarding, GET_DEVICE_INFO,btnSkipProvisioning,btnReProvisioning, btnSetSystemMode1, btStartOtaUpdate,btnAbortOtaUpdate;
+            btngrpWifiProvision, Play_Melody_list, Play_Melody, btngrpOnBoarding, GET_DEVICE_INFO, btnReProvisioning, btnSetSystemMode1, btStartOtaUpdate, btnAbortOtaUpdate, btnWifiAbort, btnOnBoardingAbort,BtSecretDeviceID;
     ProgressBar otaProgressBar;
-    TextView otaProgressText;
-    private DeviceListAdapter deviceListAdapter;
-    private ListView listViewDevices;
-    private String selectedDeviceMac, formattedMac, bleAddress;
-    private Uri selectedFileUri; // store selected file uri
-    private Spinner spinnerDoorLockType;
-    private int onBoardingType;
-
+    TextView otaProgressText,wifiRssValue,BleRssVal,deviceBleStatusVal,WifiRouter_deviceStatusVal,udpStatusVal,UdpRssVal,RemoteRingerConnectionStatusVal;
     // Data for Spinner
     String[] doorLockTypes = {
             "Select Door Lock Type",   // Default (invalid) selection
@@ -83,12 +78,20 @@ public class MainActivity extends AppCompatActivity {
     };
     // Map to hold label -> value
     HashMap<String, Integer> doorLockTypeMap = new HashMap<>();
+    private DeviceListAdapter deviceListAdapter;
+    private ListView listViewDevices;
+    private String selectedDeviceMac, formattedMac, bleAddress;
+    private Uri selectedFileUri; // store selected file uri
+    private Spinner spinnerDoorLockType;
+    private int onBoardingType;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+        ScrollView scrollView = findViewById(R.id.scrollView); // set an ID in XML if needed
+        scrollView.post(() -> scrollView.fullScroll(View.FOCUS_UP));
         // init the object
         initObject();
 
@@ -108,7 +111,7 @@ public class MainActivity extends AppCompatActivity {
         /**
          * **🔹  initialize And ManageSession for ble device **
          */
-        remoteRingerSDK.initializeAndManageSession(new RingerCallbacks.SessionCallback() {
+        remoteRingerSDK.initializeAndManageSession(edtSecretConnectDeviceID.getText().toString().trim(),new RingerCallbacks.SessionCallback() {
             @Override
             public void onLastConnectedDevices(List<String> devices) {
                 Log.d(TAG, "Last connected devices: " + devices);
@@ -118,6 +121,12 @@ public class MainActivity extends AppCompatActivity {
             public void onDeviceConnected(String connectedDevice) {
                 Log.d(TAG, "Currently connected to: " + connectedDevice);
                 Toast.makeText(MainActivity.this, "Connected to: " + connectedDevice, Toast.LENGTH_SHORT).show();
+                // 13-06-2025
+                RemoteRingerConnectionStatusVal.setText(connectedDevice);
+
+                gettingWifiStatusValue();
+                gettingBleStatusValue();
+                gettingUdpStatusValue();
             }
 
             @Override
@@ -140,7 +149,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // :::::::::::  Scan Device ::::::::::::
-        btnScan.setOnClickListener(v -> {scanForDevices();
+        btnScan.setOnClickListener(v -> {
+            scanForDevices();
         });
         // :::::::::::  set Application Boot Mode ::::::::::::
         SET_APPLICATION_BOOT_MODE.setOnClickListener(v -> setApplicationBootMode());
@@ -149,14 +159,13 @@ public class MainActivity extends AppCompatActivity {
         // :::::::::::  connect Device ::::::::::::
         btnConnect.setOnClickListener(v -> connectToDevice());
         // :::::::::::  Mobile Auth ::::::::::::
-        btnMobileAuth.setOnClickListener(v -> mobileAuth());
+      //  btnMobileAuth.setOnClickListener(v -> mobileAuth());
         // :::::::::::  set system mode ::::::::::::
-       // btnSetSystemMode.setOnClickListener(v -> setSystemMode());
+        // btnSetSystemMode.setOnClickListener(v -> setSystemMode());
         // :::::::::::   skip_Provision ::::::::::::
-        btnSkipProvisioning.setOnClickListener(v -> skipProvisionBoarding());
+        /*btnSkipProvisioning.setOnClickListener(v -> skipProvisionBoarding());*/
         //set factory out
         btnSetSystemMode1.setOnClickListener(v -> setSystemMode1());
-
         // :::::::::::  set Door Lock Ble Address ::::::::::::
         btnsetDoorLockBleAddress.setOnClickListener(view -> setDoorLockBleAddress());
         // :::::::::::  set door lock id ::::::::::::
@@ -170,11 +179,11 @@ public class MainActivity extends AppCompatActivity {
         // :::::::::::  set Wifi Password ::::::::::::
         btnSetWifiPass.setOnClickListener(v -> setWifiPass());
         // :::::::::::   Wifi Activation ::::::::::::
-        btnWifiActivation.setOnClickListener(v -> setWifiActivation());
+      //  btnWifiActivation.setOnClickListener(v -> setWifiActivation());
         // :::::::::::   Wifi Activation ::::::::::::
         btnMobileUnAuth.setOnClickListener(v -> mobileUnAuth());
         // :::::::::::   set setSystemProvisionModeBoarding ::::::::::::
-       // btnWifiProvisionMode.setOnClickListener(v -> setSystemProvisionModeBoarding());
+        // btnWifiProvisionMode.setOnClickListener(v -> setSystemProvisionModeBoarding());
         // :::::::::::   set Serial Number:::::::::::
         btnSetSerialNumber.setOnClickListener(v -> setSerialNumber());
         // :::::::::::   Get Serial Number:::::::::::
@@ -187,6 +196,8 @@ public class MainActivity extends AppCompatActivity {
         btnsetDoorLockSecretKey.setOnClickListener(v -> setDoorLockSecretKey());
         // :::::::::::   Activate onBoarding:::::::::::
         btnsetDoorLockBleActivation.setOnClickListener(v -> setActivateOnBoarding());
+        // :::::::::::   Abort onBoarding:::::::::::
+        btnOnBoardingAbort.setOnClickListener(view -> setAbortOnBoarding());
         // :::::::::::   Activate onBoarding Success:::::::::::
         btnOnBoardingSuccess.setOnClickListener(v -> setOnBoardingSuccess());
         // :::::::::::  get Firmware Version ::::::::::::
@@ -222,7 +233,7 @@ public class MainActivity extends AppCompatActivity {
         // :::::::::::  Current Audio Tone ::::::::::::
         btCurrentToneID.setOnClickListener(v -> currentAudioToneId());
         // :::::::::::  Play Melody List ::::::::::::
-       // Play_Melody_list.setOnClickListener(v -> showToneList(MainActivity.this));
+        // Play_Melody_list.setOnClickListener(v -> showToneList(MainActivity.this));
         Play_Melody_list.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -244,13 +255,13 @@ public class MainActivity extends AppCompatActivity {
         btnReProvisioning.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                String wifiName1 = edtsetWifiSsid.getText().toString();
-                String password1 = edtsetWifiPassword.getText().toString();
-                remoteRingerSDK.RemoteRinger_ReProvision(wifiName1, password1, new RingerCallbacks.ReProvisionCallBack() {
+                String wifiName1 = edtsetWifiSsid.getText().toString().trim();
+                String password1 = edtsetWifiPassword.getText().toString().trim();
+                remoteRingerSDK.RemoteRinger_ReProvision(wifiName1, password1, new RingerCallbacks.ProvisionCallback() {
                     @Override
                     public void onSuccess(String message) {
                         runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this, "ReProvision State Main: " +message, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "ReProvision State Main: " + message, Toast.LENGTH_SHORT).show();
                             Log.d(TAG, message);
                         });
                     }
@@ -258,7 +269,7 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onError(String errorMessage) {
                         runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this,  errorMessage, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, errorMessage, Toast.LENGTH_SHORT).show();
                             Log.d(TAG, errorMessage);
                         });
 
@@ -275,56 +286,57 @@ public class MainActivity extends AppCompatActivity {
         btngrpWifiProvision.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                String wifiName1 = edtsetWifiSsid.getText().toString();
-                String password1 = edtsetWifiPassword.getText().toString();
-                    remoteRingerSDK.RemoteRinger_Provision(wifiName1, password1, new RingerCallbacks.ProvisionCallback() {
-                        @Override
-                        public void onSuccess(String message) {
-                            runOnUiThread(() -> {
-                                Toast.makeText(MainActivity.this, "Provision State Main: " +message, Toast.LENGTH_SHORT).show();
-                                Log.d(TAG, message);
-                            });
-                        }
+                String wifiName1 = edtsetWifiSsid.getText().toString().trim();
+                String password1 = edtsetWifiPassword.getText().toString().trim();
+                remoteRingerSDK.RemoteRinger_Provision(wifiName1, password1, new RingerCallbacks.ProvisionCallback() {
+                    @Override
+                    public void onSuccess(String message) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this, "Provision State Main: " + message, Toast.LENGTH_SHORT).show();
+                            Log.d(TAG, message);
+                        });
+                    }
 
-                        @Override
-                        public void onError(String errorMessage) {
-                            runOnUiThread(() -> {
-                                Toast.makeText(MainActivity.this,  errorMessage, Toast.LENGTH_SHORT).show();
-                                Log.d(TAG, errorMessage);
-                            });
+                    @Override
+                    public void onError(String errorMessage) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this, errorMessage, Toast.LENGTH_SHORT).show();
+                            Log.d(TAG, errorMessage);
+                        });
 
-                        }
-                    });
-                }
+                    }
+                });
+            }
 
         });
 //        btngrpOnBoarding.setOnClickListener(v -> OnBoarding());
         btnDisConnect.setOnClickListener(v -> disconnectDevice());
         GET_DEVICE_INFO.setOnClickListener(v -> getDeviceInfo());
+        // :::::::::::  set Secret key::::::::::::
+        BtSecretDeviceID.setOnClickListener(v->setSecretKey());
         // :::::::::::  startOtaUpdate::::::::::::
         btStartOtaUpdate.setOnClickListener(v -> {
             sendOtaControlData();
         });
         btnAbortOtaUpdate.setOnClickListener(v -> RemoteRinger_AbortOtaUpdate());
+        btnWifiAbort.setOnClickListener(view -> RemoteRingers_AbortProvisioning());
 
         btngrpOnBoarding.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 int selectedLabel = spinnerDoorLockType.getSelectedItemPosition();
-
                 if (selectedLabel == 0) {
                     // First item is default hint, invalid selection
                     Toast.makeText(MainActivity.this, "Please select a valid Door Lock Type", Toast.LENGTH_SHORT).show();
                 } else {
                     // Valid selection: map to integer value 1,2,3,4
                     onBoardingType = selectedLabel; // because options[1] = 1, etc.
-//                    Constant_Variable.onboardingType = selectedValue;  // Store globally
-                    // Proceed with logic
                     OnBoarding(onBoardingType);
                 }
             }
         });
     }
+
 
     private void initObject() {
         requestBluetoothPermissions();
@@ -336,10 +348,17 @@ public class MainActivity extends AppCompatActivity {
         btnSetWifiSsid = findViewById(R.id.btnSetWifiSsid);
         btnGetWifiSsid = findViewById(R.id.btnGetWifiSsid);
         btnSetWifiPass = findViewById(R.id.btnSetWifiPass);
-        Play_Melody=findViewById(R.id.Play_Melody);
+        Play_Melody = findViewById(R.id.Play_Melody);
         btnWifiActivation = findViewById(R.id.btnWifiActivation);
-        btnReProvisioning=findViewById(R.id.btnReProvisioning);
-        btnSkipProvisioning = findViewById(R.id.btnSkipProvisioning);
+        btnReProvisioning = findViewById(R.id.btnReProvisioning);
+        deviceBleStatusVal=findViewById(R.id.deviceBleStatusVal);
+        WifiRouter_deviceStatusVal=findViewById(R.id.WifiRouter_deviceStatusVal);
+        udpStatusVal=findViewById(R.id.udpsStatusVal);
+        UdpRssVal=findViewById(R.id.UdpRssVal);
+        edtSecretConnectDeviceID=findViewById(R.id.edtSecretConnectDeviceID);
+       // btnSkipProvisioning = findViewById(R.id.btnSkipProvisioning);
+        wifiRssValue=findViewById(R.id.wifiRssValue);
+        BleRssVal=findViewById(R.id.BleRssVal);
         btnsetDoorLockId = findViewById(R.id.btnsetDoorLockId);
         btnsetDoorLockBleAddress = findViewById(R.id.btnsetDoorLockBleAddress);
         btnsetDoorLockSecretKey = findViewById(R.id.btnsetDoorLockSecretKey);
@@ -399,8 +418,13 @@ public class MainActivity extends AppCompatActivity {
         edtDeviceModelID = findViewById(R.id.edtDeviceModelID);
         otaProgressBar = findViewById(R.id.otaProgressBar);
         otaProgressText = findViewById(R.id.otaProgressText);
-        btnAbortOtaUpdate=findViewById(R.id.btnAbortOtaUpdate);
+        btnAbortOtaUpdate = findViewById(R.id.btnAbortOtaUpdate);
         spinnerDoorLockType = findViewById(R.id.spinnerDoorLockType);
+        btnWifiAbort = findViewById(R.id.btnWifiAbort);
+        btnOnBoardingAbort = findViewById(R.id.btnOnBoardingAbort);
+        edtSecretDeviceID=findViewById(R.id.edtSecretDeviceID);
+        BtSecretDeviceID=findViewById(R.id.BtSecretDeviceID);
+        RemoteRingerConnectionStatusVal=findViewById(R.id.RemoteRingerConnectionStatusVal);
 
         // ✅ Initialize SDK with API Key
         try {
@@ -420,90 +444,77 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * **🔹 set skip provision**
+     * **🔹 getting the wifi Router Status Value 16-05-2025**
      */
-    private void skipProvisionBoarding() {
-
-        Log.e(TAG, "Input RemoteRinger_SkipProvision:::::::" + setSystemProvisionMode);
-        remoteRingerSDK.RemoteRinger_SkipProvision(new RingerCallbacks.SkipProvisionCallBack() {
+    private void gettingWifiStatusValue() {
+        remoteRingerSDK.RemoteRinger_GetWifiStatus(new RingerCallbacks.WifiStatusCallBack() {
             @Override
-            public void onSuccess(String message) {
+            public void onWifiStatus(String WifiStatus,int RssiValue) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "SkipProvision mode success : " +message, Toast.LENGTH_SHORT).show();
-                    Log.d(TAG, message);
-                });
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "SkipProvision Mode error : " +errorMessage, Toast.LENGTH_SHORT).show();
-                    Log.d(TAG, errorMessage);
+                    WifiRouter_deviceStatusVal.setText(WifiStatus);
+                    if(RssiValue==-128) {
+                        wifiRssValue.setText("---");
+                    }else{
+                        wifiRssValue.setText("" + RssiValue);
+                    }
                 });
             }
         });
+    }
+
+    /**
+     * **🔹 getting the ble Router Status Value 16-05-2025**
+     */
+    private void gettingBleStatusValue() {
+        remoteRingerSDK.RemoteRinger_GetDluBleStatus(new RingerCallbacks.DluBleStatusCallBack() {
+            @Override
+            public void onDLuBleStatus(String routerStatus, int bleRssiValue) {
+                runOnUiThread(() -> {
+                    deviceBleStatusVal.setText(routerStatus);
+                    if(bleRssiValue==-128){
+                        BleRssVal.setText("---");
+                    }else{
+                        BleRssVal.setText(""+bleRssiValue);
+                    }
+                });
+            }
+        });
+
 
     }
 
     /**
-     * **🔹  Show Tone list **
+     * **🔹 getting the Udp Status Value 16-05-2025**
      */
-
-   /* private void showToneList(Context context) {
-        List<Tone> tones = JsonReader.readJson(context);
-
-        if (tones == null || tones.isEmpty()) {
-            Toast.makeText(context, "No data found!", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // Create AlertDialog Builder
-        AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Select Tone");
-
-        // Inflate Custom Layout Correctly
-        LayoutInflater inflater = LayoutInflater.from(context);
-        View view = inflater.inflate(R.layout.popup_listview, null);
-        ListView listView = view.findViewById(R.id.popupListView);
-
-        // Set Adapter
-        PopupListAdapter adapter = new PopupListAdapter(context, tones);
-        listView.setAdapter(adapter);
-
-        // Set Custom View and Create Dialog
-        builder.setView(view);
-        AlertDialog dialog = builder.create();
-        dialog.show();
-
-        // Handle List Item Click
-        listView.setOnItemClickListener((parent, view1, position, id) -> {
-            Tone selectedTone = tones.get(position);
-            int selectedId = selectedTone.getId();
-            String selectedName = selectedTone.getName();
-
-            // Show selected ID & Name in a Toast message
-            remoteRingerSDK.RemoteRinger_SetMelody(selectedId, new RingerCallbacks.PlayMelodyCallback() {
-                @Override
-                public void onSuccess(String message) {
-
-                }
-
-                @Override
-                public void onError(String errorMessage) {
-
-                }
-            });
-
-
-            // Close dialog after selection
-            dialog.dismiss();
+    private void gettingUdpStatusValue() {
+        remoteRingerSDK.RemoteRinger_GetDluUdpStatus(new RingerCallbacks.DluUdpStatusCallBack() {
+            @Override
+            public void onDluUdpStatus(String UdpStatus, int UdpRssiValue) {
+                runOnUiThread(() -> {
+                    udpStatusVal.setText(UdpStatus);
+                    if(UdpRssiValue==-128){
+                        UdpRssVal.setText("---");
+                    }else{
+                        UdpRssVal.setText(""+UdpRssiValue);
+                    }
+                });
+            }
         });
-    }*/
+    }
 
+    public void noData(){
+        WifiRouter_deviceStatusVal.setText("No Data");
+        wifiRssValue.setText("---");
+        deviceBleStatusVal.setText("No Data");
+        BleRssVal.setText("---");
+        udpStatusVal.setText("No Data");
+        UdpRssVal.setText("---");
+
+    }
 
     //added new
     private void sendOtaControlData() {
-        remoteRingerSDK.RemoteRinger_StartOtaUpdate( selectedFileUri, new RingerCallbacks.OtaProgressCallback() {
+        remoteRingerSDK.RemoteRinger_StartOtaUpdate(selectedFileUri, new RingerCallbacks.OtaProgressCallback() {
             @Override
             public void onDownloadProgress(int progress) {
                 Log.d(TAG, "OTA Update Progress MainActivity: " + progress + "%");
@@ -517,12 +528,15 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 Log.d(TAG, "OTA Update Progress MainActivity onSuccess: " + message);
+               // Toast.makeText(MainActivity.this, "OTA Update Completed : " + message, Toast.LENGTH_SHORT).show();
 
             }
 
             @Override
             public void onError(String errorMessage) {
                 Log.d(TAG, "OTA Update Progress MainActivity errorMessage: " + errorMessage);
+            //    Toast.makeText(MainActivity.this, "OTA Update Error : " + errorMessage, Toast.LENGTH_SHORT).show();
+
 
             }
         });
@@ -619,15 +633,19 @@ public class MainActivity extends AppCompatActivity {
     /**
      * **🔹 connectToDevice devices**
      */
+
     private void connectToDevice() {
 
-        remoteRingerSDK.RemoteRinger_ConnectDevice(selectedDeviceMac, new RingerCallbacks.RingerDeviceCallback() {
+        remoteRingerSDK.RemoteRinger_ConnectDevice(selectedDeviceMac,edtSecretConnectDeviceID.getText().toString().trim(), new RingerCallbacks.RingerDeviceCallback() {
             @Override
             public void onSuccess(String message) {
-                runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this,  message, Toast.LENGTH_SHORT).show();
-                    Log.d(TAG, message);
-                });
+                Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show();
+                Log.d(TAG, message);
+                RemoteRingerConnectionStatusVal.setText(message.replace("Connected to", ""));
+                // 13-06-2025
+                gettingWifiStatusValue();
+                gettingBleStatusValue();
+                gettingUdpStatusValue();
             }
 
             @Override
@@ -635,16 +653,63 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     Toast.makeText(MainActivity.this, "Connection Failed: " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.e(TAG, "Connection Failed: " + errorMessage);
+                    noData();
+                });
+            }
+
+            @Override
+            public void onDeviceDataReceived(Map<String, String> dataMap) {
+                runOnUiThread(() -> {
+                    String eventValue = dataMap.get("Current Tone");
+                    String volumeValue = dataMap.get("Volume Level");
+                    String currentStates = dataMap.get("Current State");
+
+                    if (eventValue != null && !eventValue.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Current Tone: " + eventValue, Toast.LENGTH_SHORT).show();
+                    }
+
+                    if (volumeValue != null && !volumeValue.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Volume Level: " + volumeValue, Toast.LENGTH_SHORT).show();
+                    }
+                    if (currentStates != null && !currentStates.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Current State " + currentStates, Toast.LENGTH_SHORT).show();
+                    }
                 });
             }
         });
+
     }
+
+    /**
+     * **🔹 set secret key**
+     */
+
+    private void setSecretKey(){
+        String secretKeys = edtSecretDeviceID.getText().toString().trim();
+        Log.e(TAG, "secretKeys:::::::" + secretKeys);
+        remoteRingerSDK.RemoteRinger_SecretKey(secretKeys, new RingerCallbacks.AuthenticationCallback() {
+            @Override
+            public void onSuccess(String message) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, message);
+                });
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Toast.makeText(MainActivity.this, "secretKeys: " + errorMessage, Toast.LENGTH_SHORT).show();
+            }
+        });
+
+    }
+
 
     /**
      * **🔹 Mobile Auth**
      */
 
-    private void mobileAuth() {
+    /*private void mobileAuth() {
         Log.e(TAG, "Input Serial Number:::::::" + serialNumber);
         remoteRingerSDK.RemoteRinger_Authentication(serialNumber, new RingerCallbacks.AuthenticationCallback() {
             @Override
@@ -657,11 +722,11 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onError(String errorMessage) {
-               Toast.makeText(MainActivity.this, "Mobile Auth error: " + errorMessage, Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "Mobile Auth error: " + errorMessage, Toast.LENGTH_SHORT).show();
             }
         });
 
-    }
+    }*/
 
     /**
      * **🔹 set Door Lock Ble Address**
@@ -673,7 +738,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Door Lock BLE Success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Door Lock BLE Success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -681,7 +746,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Door Lock BLE Error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Door Lock BLE Error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -698,7 +763,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Door Lock ID Success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Door Lock ID Success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
 
@@ -707,14 +772,16 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Door Lock ID Error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Door Lock ID Error: " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
         });
     }
 
-  /*  *//**
+    /*  */
+
+    /**
      * **🔹 set System Mode 2**
      *//*
     private void setSystemMode() {
@@ -736,15 +803,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }*/
-
     private void setSystemMode1() {
-        
+
         Log.e(TAG, "Input setSystemMode 1 :::::::" + setSerialNumber.getText().toString());
-        remoteRingerSDK.RemoteRinger_deviceCommissioning( new RingerCallbacks.SystemModeCallback() {
+        remoteRingerSDK.RemoteRinger_deviceCommissioning(new RingerCallbacks.SystemModeCallback() {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Factory mode Success: " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Factory mode Success: " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
 
@@ -753,7 +819,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Factory mode Error " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Factory mode Error " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -770,7 +836,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "System mode in : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Current application state: " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -778,7 +844,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "System mode error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "System mode error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -795,7 +861,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "WiFi SSID : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "WiFi SSID : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
 
@@ -804,7 +870,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "WiFi SSID error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "WiFi SSID error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -819,7 +885,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "WiFi SSID success: " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "WiFi SSID success: " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
 
@@ -828,7 +894,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "WiFi SSID error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "WiFi SSID error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -845,7 +911,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "WiFi pass is : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "WiFi pass : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
 
@@ -854,7 +920,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "WiFi pass err : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "WiFi pass error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -864,13 +930,13 @@ public class MainActivity extends AppCompatActivity {
     /**
      * **🔹 set Wifi Activation **
      */
-    private void setWifiActivation() {
+    /*private void setWifiActivation() {
         Log.e(TAG, "Input setWifiActivation:::::::" + setWifiActivation);
         remoteRingerSDK.RemoteRinger_wifiActivation(setWifiActivation, new RingerCallbacks.WifiActivationCallback() {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "WiFi Activation Success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "WiFi Activation Success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -878,12 +944,12 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "WiFi Activiation erro : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "WiFi Activation error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
         });
-    }
+    }*/
 
     /**
      * **🔹 Mobile unAuth **
@@ -911,7 +977,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Provision mode success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Provision mode success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -919,7 +985,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Provision Mode error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Provision Mode error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -945,7 +1011,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Serial number error message: " + errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Serial number error: " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -991,7 +1057,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onSuccess(String message) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Hardware Version Success : " +message, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "Hardware Version Success : " + message, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, message);
                     });
                 }
@@ -999,7 +1065,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onError(String errorMessage) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Hardware Version Error: " +errorMessage, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "Hardware Version Error: " + errorMessage, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, errorMessage);
                     });
                 }
@@ -1028,10 +1094,9 @@ public class MainActivity extends AppCompatActivity {
             public void onError(String errorMessage) {
 
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Hardware version error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Hardware version error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
-
 
 
             }
@@ -1048,7 +1113,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String modelId) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Door Lock Secret key : " +modelId, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Door Lock Secret key : " + modelId, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, modelId);
                 });
 
@@ -1057,7 +1122,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String error) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Door Lock Secret key error : " +error, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Door Lock Secret key error : " + error, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, error);
                 });
             }
@@ -1073,11 +1138,11 @@ public class MainActivity extends AppCompatActivity {
         String selectedLabel = spinnerDoorLockType.getSelectedItem().toString();
         onBoardingType = doorLockTypeMap.get(selectedLabel);
         Log.e(TAG, "Input setActivateOnBoarding::::::::::::::" + onBoardingActivationMode);
-        remoteRingerSDK.RemoteRinger_setOnBoardingActivation(onBoardingActivationMode,onBoardingType, new RingerCallbacks.OnBoardingActivationCallback() {
+        remoteRingerSDK.RemoteRinger_setOnBoardingActivation(onBoardingActivationMode, onBoardingType, new RingerCallbacks.OnBoardingActivationCallback() {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Onboarding activation success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Onboarding activation success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1085,14 +1150,54 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Onboarding activation error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Onboarding activation error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
         });
-
-
     }
+
+    /**
+     * **🔹 Abort onBoarding**
+     */
+    private void setAbortOnBoarding() {
+        int selectedLabel = spinnerDoorLockType.getSelectedItemPosition();
+        if (selectedLabel == 0) {
+            // First item is default hint, invalid selection
+            Toast.makeText(MainActivity.this, "Please select a valid Door Lock Type", Toast.LENGTH_SHORT).show();
+        } else {
+            // Valid selection: map to integer value 1,2,3,4
+            onBoardingType = selectedLabel; // because options[1] = 1, etc.
+            AbortOnBoarding();
+        }
+    }
+
+    /**
+     * **🔹 Abort onBoarding**
+     */
+    private void AbortOnBoarding() {
+        String selectedLabel = spinnerDoorLockType.getSelectedItem().toString();
+        onBoardingType = doorLockTypeMap.get(selectedLabel);
+        Log.e(TAG, "onBoardingType::::::::::::::" + onBoardingType);
+        remoteRingerSDK.RemoteRinger_AbortOnBoarding(new RingerCallbacks.OnBoardingActivationCallback() {
+            @Override
+            public void onSuccess(String message) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "Onboarding activation Abort success : " + message, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, message);
+                });
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "Onboarding activation Abort error : " + errorMessage, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, errorMessage);
+                });
+            }
+        });
+    }
+
 
     /**
      * **🔹 OnBoardingSuccess**
@@ -1103,7 +1208,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Onboarding success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Onboarding success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1111,7 +1216,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Onboarding error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Onboarding error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1128,15 +1233,15 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                Log.d(TAG, message);
-                Toast.makeText(getApplicationContext(), "Firmware Version :" + message, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, message);
+                    Toast.makeText(getApplicationContext(), "Firmware Version :" + message, Toast.LENGTH_SHORT).show();
                 });
             }
 
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "firmware version success : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "firmware version success : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1152,15 +1257,15 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(int mode) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Application boot mode : " +mode, Toast.LENGTH_SHORT).show();
-                    Log.d(TAG, "mode  "+mode);
+                    Toast.makeText(MainActivity.this, "Application boot mode : " + mode, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, "mode  " + mode);
                 });
             }
 
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Boot mode error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Boot mode error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1177,7 +1282,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Boot mode success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Boot mode success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1185,7 +1290,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Boot mode error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Boot mode error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1200,7 +1305,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Factory reset success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Factory reset success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1208,7 +1313,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Factory reset error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Factory reset error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1223,7 +1328,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Device Reboot success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Device Reboot success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1231,7 +1336,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Device reboot error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Device reboot error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1247,15 +1352,15 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(int modelId) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Device Model ID success : " +modelId, Toast.LENGTH_SHORT).show();
-                   // Log.d(TAG, String.valueOf(modelId));
+                    Toast.makeText(MainActivity.this, "Device Model ID success : " + modelId, Toast.LENGTH_SHORT).show();
+                    // Log.d(TAG, String.valueOf(modelId));
                 });
             }
 
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Device Model ID error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Device Model ID error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1274,7 +1379,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onSuccess(String message) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "set device model id success : " +message, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "set device model id success : " + message, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, message);
                     });
 
@@ -1283,7 +1388,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onError(String errorMessage) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "set device model id error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "set device model id error : " + errorMessage, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, errorMessage);
                     });
                 }
@@ -1302,7 +1407,7 @@ public class MainActivity extends AppCompatActivity {
             public void onSuccess(String message) {
 
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "get Door lock id success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "get Door lock id success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1310,7 +1415,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Door lock id error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Door lock id error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1325,7 +1430,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Stopping audio tone success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Stopping audio tone success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1333,7 +1438,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Stopping audio tone error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Stopping audio tone error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1352,7 +1457,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onSuccess(String message) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Setting audio tone success : " +message, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "Setting audio tone success : " + message, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, message);
                     });
 
@@ -1361,7 +1466,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onError(String errorMessage) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Setting audio tone error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "Setting audio tone error : " + errorMessage, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, errorMessage);
                     });
                 }
@@ -1377,23 +1482,48 @@ public class MainActivity extends AppCompatActivity {
 
     private void getVolumeLevel() {
         remoteRingerSDK.RemoteRinger_GetVolumeMelodyLevel(new RingerCallbacks.VolumeLevelCallback() {
+            @Override
+            public void onSuccess(int volumeLevel) {
+                Log.d(TAG, String.valueOf(volumeLevel));
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "get volume level error : " + errorMessage, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, errorMessage);
+                });
+            }
+
+            @Override
+            public void onSuccess(String message) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "get volume level success : " + message, Toast.LENGTH_SHORT).show();
+                });
+            }
+        });
+
+
+/*
+        remoteRingerSDK.RemoteRinger_GetVolumeMelodyLevel(new RingerCallbacks.VolumeLevelCallback() {
 
             @Override
             public void onSuccess(int volumeLevel) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "get volume level success : " +volumeLevel, Toast.LENGTH_SHORT).show();
-                    Log.d(TAG, ""+volumeLevel);
+                    Toast.makeText(MainActivity.this, "get volume level success : " + volumeLevel, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, "" + volumeLevel);
                 });
             }
 
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "get volume level error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "get volume level error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
         });
+*/
     }
 
     /**
@@ -1408,7 +1538,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onSuccess(String message) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "set volume level success : " +message, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "set volume level success : " + message, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, message);
                     });
                 }
@@ -1417,7 +1547,7 @@ public class MainActivity extends AppCompatActivity {
                 public void onError(String errorMessage) {
                     // Handle error
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "set volume level error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "set volume level error : " + errorMessage, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, errorMessage);
                     });
                 }
@@ -1436,7 +1566,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Volume increased success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Volume increased success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1444,7 +1574,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Volume increased error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Volume increased error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1459,7 +1589,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "next audio tone success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "next audio tone success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
 
@@ -1468,7 +1598,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Next audio tone error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Next audio tone error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1483,7 +1613,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Previous audio tone success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Previous audio tone success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1491,7 +1621,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Previous audio tome error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Previous audio tone error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1503,7 +1633,6 @@ public class MainActivity extends AppCompatActivity {
      */
 
 
-
     private void previewAudioTone() {
 
         try {
@@ -1513,7 +1642,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onSuccess(String message) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Preview success : " +message, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "Preview success : " + message, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, message);
                     });
 
@@ -1522,7 +1651,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onError(String errorMessage) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Preview error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "Preview error : " + errorMessage, Toast.LENGTH_SHORT).show();
                         Log.d(TAG, errorMessage);
                     });
                 }
@@ -1541,7 +1670,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Current tone success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Current tone success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
 
@@ -1550,7 +1679,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Current tone error: " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Current tone error: " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1565,7 +1694,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onSuccess(String message) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "decrease volume success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "decrease volume success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1573,7 +1702,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Decrease volume error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Decrease volume error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1583,20 +1712,20 @@ public class MainActivity extends AppCompatActivity {
     /**
      * **🔹  play melody **
      */
-    private void playMelody(){
+    private void playMelody() {
         remoteRingerSDK.RemoteRinger_PlayMelody(new RingerCallbacks.PlayMelodyCallback() {
             @Override
             public void onSuccess(String message) {
 
-                    Toast.makeText(MainActivity.this, "Play melody success : " +message, Toast.LENGTH_SHORT).show();
-                    Log.d(TAG, message);
+                Toast.makeText(MainActivity.this, "Play melody success : " + message, Toast.LENGTH_SHORT).show();
+                Log.d(TAG, message);
 
             }
 
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Play melody error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Play melody error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1607,16 +1736,16 @@ public class MainActivity extends AppCompatActivity {
      * **🔹  OnBoarding **
      */
     private void OnBoarding(int doorlockUnitType) {
-           String doorLockId= edtsetDoorLockId.getText().toString();
-           String encryptionKey= edtsetDoorLockSecretKey.getText().toString();
-           String macId= edtsetDoorLockBleAddress.getText().toString();
+        String doorLockId = edtsetDoorLockId.getText().toString().trim();
+        String encryptionKey = edtsetDoorLockSecretKey.getText().toString().trim();
+        String macId = edtsetDoorLockBleAddress.getText().toString().trim();
 
-        remoteRingerSDK.RemoteRinger_Onboarding(doorLockId, encryptionKey, macId, doorlockUnitType,new RingerCallbacks.OnboardingCallback() {
+        remoteRingerSDK.RemoteRinger_Onboarding(doorLockId, encryptionKey, macId, doorlockUnitType, new RingerCallbacks.OnboardingCallback() {
             @Override
             public void onSuccess(String message) {
 
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Onboarding success : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Onboarding success : " + message, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, message);
                 });
             }
@@ -1624,7 +1753,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Onboarding error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Onboarding error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1632,6 +1761,7 @@ public class MainActivity extends AppCompatActivity {
 
 
     }
+
     /**
      * **🔹  disconnectDevice **
      */
@@ -1640,19 +1770,16 @@ public class MainActivity extends AppCompatActivity {
         remoteRingerSDK.RemoteRinger_DisconnectDevice(new RingerCallbacks.DisconnectionCallback() {
             @Override
             public void onSuccess(String message) {
-
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Disconnected from : " +message, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Disconnected from : " + message, Toast.LENGTH_SHORT).show();
+                    RemoteRingerConnectionStatusVal.setText("");
                     Log.d(TAG, message);
                 });
-
-
             }
 
             @Override
             public void onError(String errorMessage) {
                 Toast.makeText(MainActivity.this, errorMessage, Toast.LENGTH_SHORT).show();
-
             }
         });
     }
@@ -1664,15 +1791,16 @@ public class MainActivity extends AppCompatActivity {
         remoteRingerSDK.RemoteRinger_GetDeviceInfo(new RingerCallbacks.DevicesInfoCallback() {
             @Override
             public void onDevicesRetrieved(List<DeviceInfo> devices) {
-                StringBuilder messageBuilder = new StringBuilder();
+               // StringBuilder messageBuilder = new StringBuilder();
                 for (DeviceInfo device : devices) {
 
 
-                    messageBuilder.append("Serial: ").append(device.getSerialNumber())
-                            .append("\nHardware: ").append(device.getHardwareVersion())
-                            .append("\nFirmware: ").append(device.getFirmwareVersion())
-                            .append("\nBoot Mode: ").append(device.getApplicationBootMode())
-                            .append("\nModel ID: ").append(device.getDeviceModelId());
+                    /*messageBuilder.append("Serial     : ").append(device.getSerialNumber()).append("\n")
+                            .append("Hardware   : ").append(device.getHardwareVersion()).append("\n")
+                            .append("Firmware   : ").append(device.getFirmwareVersion()).append("\n")
+                            .append("Boot Mode  : ").append(device.getApplicationBootMode()).append("\n")
+                            .append("Model ID   : ").append(device.getDeviceModelId());
+
 
                     String message = messageBuilder.toString();
                     int chunkSize = 3000; // Max safe Toast length
@@ -1680,10 +1808,23 @@ public class MainActivity extends AppCompatActivity {
                         String chunk = message.substring(i, Math.min(i + chunkSize, message.length()));
 
                         runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this, "Device Info : " +chunk, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "Device Info : " + chunk, Toast.LENGTH_SHORT).show();
                             Log.d(TAG, chunk);
                         });
-                    }
+                    }*/
+
+                    runOnUiThread(() -> {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle("Device Info")
+                                .setMessage("Serial     : " + device.getSerialNumber() + "\n" +
+                                        "Hardware   : " + device.getHardwareVersion() + "\n" +
+                                        "Firmware   : " + device.getFirmwareVersion() + "\n" +
+                                        "Boot Mode  : " + device.getApplicationBootMode() + "\n" +
+                                        "Model ID   : " + device.getDeviceModelId())
+                                .setPositiveButton("OK", null)
+                                .show();
+                    });
+
                 }
 
             }
@@ -1691,7 +1832,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String errorMessage) {
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Device Info error : " +errorMessage, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Device Info error : " + errorMessage, Toast.LENGTH_SHORT).show();
                     Log.d(TAG, errorMessage);
                 });
             }
@@ -1717,4 +1858,28 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * **🔹 for the Activation Abort **
+     */
+    private void RemoteRingers_AbortProvisioning() {
+        remoteRingerSDK.RemoteRinger_AbortProvisioning(new RingerCallbacks.WifiActivationCallback() {
+            @Override
+            public void onSuccess(String message) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "Activation Abort success : " + message, Toast.LENGTH_SHORT).show();
+
+                    Log.d(TAG, message);
+                });
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "Activation Abort error : " + errorMessage, Toast.LENGTH_SHORT).show();
+                    Log.d(TAG, errorMessage);
+                });
+
+            }
+        });
+    }
 }

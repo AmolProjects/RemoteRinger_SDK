@@ -17,8 +17,8 @@ import java.util.Random;
 public abstract class RemoteRingerCommand {
     private static final String PREF_NAME = "RemoteRingerPrefs";
     private static final String REQUEST_ID_KEY = "request_id";
-    private static int requestIdCounter = -1;
     private static final byte[] actualData = new byte[1]; // Store the 1-byte data
+    private static int requestIdCounter = -1;
 
     /**
      * set the input form user one argument which value for 1 byte.
@@ -39,6 +39,22 @@ public abstract class RemoteRingerCommand {
         }
         return new byte[]{(byte) value, (byte) type};  // Two bytes: value and type
     }
+
+    /**
+     * set the input form user one argument which value for 1 byte and type for 2 byte. 13-06-2025
+     */
+    /**
+     * Set the input from user: one argument (value for 1 byte) and type for 2 bytes.
+     */
+    public static byte[] setTwoByteCommandType(int value, int type) {
+        if (value < 0 || value > 5  || type < 0 || type > 1) {
+            throw new IllegalArgumentException("Value must be 0–255, and Type must be 0–65535.");
+        }
+
+        return new byte[]{(byte) value, (byte) type}; // 1 byte for value
+    }
+
+
 
     /**
      * set the input form user one argument which value for two byte.
@@ -98,12 +114,9 @@ public abstract class RemoteRingerCommand {
             actualData = new byte[16]; // Allocate 16 bytes
         } else if (length <= 32) {
             actualData = new byte[32]; // Allocate 32 bytes
-        }
-
-        else if (length <= 34) {
+        } else if (length <= 34) {
             actualData = new byte[34]; // Allocate 34bytes
-        }
-        else {
+        } else {
             throw new IllegalArgumentException("Input string exceeds 32 bytes, truncating...");
         }
 
@@ -165,9 +178,9 @@ public abstract class RemoteRingerCommand {
         bleAddress = bleAddress.replace(":", "").toUpperCase();
 
         // Must be 12 hex characters after formatting
-        if (bleAddress.length() != 12 || !bleAddress.matches("[0-9A-F]{12}")) {
+        /*if (bleAddress.length() != 12 || !bleAddress.matches("[0-9A-F]{12}")) {
             throw new IllegalArgumentException("Invalid BLE MAC address. Expected 12 hexadecimal characters (e.g., 001A7DDA7113 or 00:1A:7D:DA:71:13).");
-        }
+        }*/
 
         byte[] actualData = new byte[6];
         try {
@@ -182,8 +195,6 @@ public abstract class RemoteRingerCommand {
 
         return actualData;
     }
-
-
 
 
     /**
@@ -254,7 +265,7 @@ public abstract class RemoteRingerCommand {
         for (byte b : commandFrame) {
             hexString.append(String.format("%02X ", b));
         }
-        Log.d("RemoteRingerSDK", hexString.toString());
+        Log.d("RemoteRingerCommand", hexString.toString());
     }
 
     /**

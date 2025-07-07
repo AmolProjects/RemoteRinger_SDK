@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">RemoteRinger</string>
-    <string name="connect_to_selected_device">Connect to Selected Device</string>
+    <string name="connect_to_selected_device">Connect to Device Name</string>
     <string name="scan_devices">Scan Devices</string>
 </resources>

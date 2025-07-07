@@ -1,11 +1,14 @@
 package com.remoteringer.manager;
 
 import static com.remoteringer.Constant.Constant_Variable.*;
+import static com.remoteringer.Constant.Constant_Variable.getOnboardingState;
+import static com.remoteringer.handlers.BleResponseHandler.OtaChecksStatus;
 import static com.remoteringer.manager.BluetoothManager.CHARACTERISTIC_UUID;
 import static com.remoteringer.manager.BluetoothManager.CHARACTERISTIC_UUID_Ota_1_byte_Data;
 import static com.remoteringer.manager.BluetoothManager.CHARACTERISTIC_UUID_Ota_512_data;
 import static com.remoteringer.manager.BluetoothManager.SERVICE_UUID;
 import static com.remoteringer.manager.BluetoothManager.SERVICE_UUID_Ota;
+import static com.remoteringer.manager.BluetoothManager.ringerDeviceCallback;
 
 import android.Manifest;
 import android.app.Activity;
@@ -18,6 +21,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -28,6 +32,7 @@ import androidx.core.app.ActivityCompat;
 
 import com.remoteringer.Constant.Constant_Variable;
 import com.remoteringer.Constant.DeviceInfo;
+import com.remoteringer.Constant.ResponseDispatcher;
 import com.remoteringer.R;
 import com.remoteringer.adapter.PopupListAdapter;
 import com.remoteringer.callbacks.RingerCallbacks;
@@ -52,7 +57,6 @@ import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -68,23 +72,35 @@ import javax.crypto.spec.SecretKeySpec;
  */
 public class DeviceSettingsManager {
     public static final String Host_ID = "FFFFFFFFFFFFFFFF";
+    public static final Map<Byte, RingerCallbacks.BaseCallback> commandCallbackMap = new HashMap<>();
     private static final String TAG = "DeviceSettingsManager";
     // Error Code to Error Message Mapping
     private static final Map<String, String> errorMap = new HashMap<>();
+    //Error Code to state Message Mapping
+    private static final Map<String, String> stateMap = new HashMap<>();
+    public static boolean IsTriggerd = false;
+    public static boolean isOtaUpdatePending = false;
+    public static Integer reProvisionMode;
     private static BluetoothManager bluetoothManager;
     private static Context context;
     private static int asciiValue;
     private static DeviceSettingsManager instance;
-    private final Map<Byte, RingerCallbacks.VolumeCallback> pendingVolumeCallbacks = new HashMap<>();
-    private RingerCallbacks.HardwareVersionCallback  hardwareVersionCallback;
-    private final Map<Byte, RingerCallbacks.BaseCallback> commandCallbackMap = new HashMap<>();
-    private String tempDeviceName = "GRR_123456"; // Example device name
-    private long locallyGeneratedRandomNo;
-    private RingerCallbacks.DeviceModelCallback deviceModelCallback;
-    public static boolean isOtaUpdatePending = false;
-    private RingerCallbacks.VolumeLevelCallback volumelevelCallback;
-    public static Integer reProvisionMode;
-    private  RingerCallbacks.BootModeCallback getBootModeCallback;
+    private static PowerManager.WakeLock wakeLock;
+    private int chunkSize,packetSize;
+    private int currentChunkIndex;
+    private int totalChunks;
+    private int totalBytes;
+    BluetoothGatt bluetoothGatt;
+    private int currentOffset = 0;
+    private byte[] firmwareData;
+    private BluetoothGattCharacteristic writeCharacteristic;
+    private RingerCallbacks.OtaProgressCallback otaCallback;
+    private RingerCallbacks.WifiRssiCallBack wifiRssCallBack;
+    private RingerCallbacks.DluBleRssiCallBack bleRssCallBack;
+    private RingerCallbacks.WifiStatusCallBack wifiRouterStatusCallBack;
+    private RingerCallbacks.DluBleStatusCallBack bleRouterStatusCallBack;
+    private RingerCallbacks.DluUdpStatusCallBack dluUdpStatusCallBack;
+
     static {
         errorMap.put("ERR01", "Wrong command code");
         errorMap.put("ERR02", "Wrong CRC");
@@ -105,98 +121,54 @@ public class DeviceSettingsManager {
         errorMap.put("ERR17", "Tone IC is Not Responding");
         errorMap.put("ERR18", "Tone IC Busy");
         errorMap.put("ERR19", "WiFI not Configured");
-//        errorMap.put(" private static DeviceSettingsManager instance;ERR17", "Tone IC not responding");
+        errorMap.put("ERR20", "Activation is busy");
+//
     }
 
+    static {
+        stateMap.put("1", "Factory Out");
+        stateMap.put("2", "Provisioning");
+        stateMap.put("3", "Onboarding");
+        stateMap.put("4", "Operational");
+    }
+
+    private final Map<Byte, RingerCallbacks.VolumeCallback> pendingVolumeCallbacks = new HashMap<>();
     private final BleResponseHandler bleResponseHandler;
     private final ConcurrentHashMap<Byte, byte[]> responseMap = new ConcurrentHashMap<>();
+    private final ResponseDispatcher dispatcher = new ResponseDispatcher();
+    int baseDelay = 50; // baseline delay
+    int delayMs;
     DeviceInfo deviceInfo;
+    private RingerCallbacks.HardwareVersionCallback hardwareVersionCallback;
+    private String tempDeviceName = "GRR_123456"; // Example device name
+    private long locallyGeneratedRandomNo;
+    private RingerCallbacks.DeviceModelCallback deviceModelCallback;
+    private RingerCallbacks.PlayMelodyCallback playMelodyCallback;
+    private RingerCallbacks.SystemModeCallback systemModeCallback;
+    private RingerCallbacks.VolumeLevelCallback volumelevelCallback;
+    private RingerCallbacks.BootModeCallback getBootModeCallback;
     private String serialNumber, hardwareVersion, firmwareNumber, appBootModeID1, deviceModelID;
     private int appBootModeID;
     private RingerCallbacks.SerialNumberCallback serialNumberCallback;
     private volatile boolean isOtaPaused = false;
     private Runnable pendingOtaChunk = null;
     private boolean otaInProgress = false; // Optional for state tracking
-    private int currentMtu = 128;
+    private int currentMtu = 240;
     private Handler handler = new Handler(Looper.getMainLooper());
     private RingerCallbacks.OtaProgressCallback otaProgressCallback;
-
-    //added for hmac mobile auth
-    public long getRandomNumber() {
-        return Integer.toUnsignedLong(new Random().nextInt());
-    }
-
-    public byte[] getSecretKey() {
-        return new byte[32]; // 32 zero bytes
-    }
-
-    public byte[] hmacSHA256(byte[] key, String message) {
-        try {
-            SecretKeySpec secretKeySpec = new SecretKeySpec(key, "HmacSHA256");
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(secretKeySpec);
-            return mac.doFinal(message.getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            throw new RuntimeException("Failed to calculate HMAC SHA256", e);
-        }
-    }
+    public static boolean IsOnBoardingState = false;
+    public static boolean IsWifiOnBoardingState = false;
 
 
+    // 06-06-2025
 
-    //new hmac auth
-    public byte[] preparePayloadForAuthRequest() {
-        long mobileNonce = getRandomNumber();
-        Log.d("AuthUtils", "mobile_nonce: " + mobileNonce);
-        Constant_Variable.locallyGeneratedRandomNo = mobileNonce;
+    private int packetNumber = 0x0000;
 
-        // Convert to 8-character uppercase hex string
-        String hexString = String.format(Locale.US, "%08X", mobileNonce);
-
-        // Reverse the string in 2-character chunks
-        List<String> bytePairs = new ArrayList<>();
-        for (int i = 0; i < hexString.length(); i += 2) {
-            bytePairs.add(hexString.substring(i, i + 2));
-        }
-        Collections.reverse(bytePairs);
-        String reversedHex = String.join("", bytePairs);
-
-        // Prepend "0000"
-        String dataR = "0000" + reversedHex;
-
-        // Convert hex string to byte array
-        byte[] actualData = hexStringToBytes(dataR);
-        Log.d("AuthUtils", "actualData: " + bytesToHex(actualData));
-
-        return actualData;
-    }
-
-    private byte[] hexStringToBytes(String hex) {
-        int len = hex.length();
-        byte[] data = new byte[len / 2];
-
-        for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
-                    + Character.digit(hex.charAt(i + 1), 16));
-        }
-        return data;
-    }
-
-    private String bytesToHex(byte[] bytes) {
-        StringBuilder hexStr = new StringBuilder();
-        for (byte b : bytes) {
-            hexStr.append(String.format("%02X", b));
-        }
-        return hexStr.toString();
-    }
-
-    ///end mobile auth
 
 
     /**
      * **🔹 Create constructor of DeviceSettingsManager **
      */
-
-
 
     private DeviceSettingsManager(Context context, BluetoothManager bluetoothManager, Activity activity) {
         DeviceSettingsManager.context = context;
@@ -219,6 +191,13 @@ public class DeviceSettingsManager {
      * **🔹  sendOtaControlCommandRequest **
      */
     public static void sendOtaControlCommandRequest(byte[] command, RingerCallbacks.OtaCallback callback) {
+        //After screen lock OTA progress should be remain active
+
+        PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "OTA::WakeLock");
+        if (!wakeLock.isHeld()) {
+            wakeLock.acquire(10 * 60 * 1000L); // e.g., 10 minutes
+        }
         BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
         if (bluetoothGatt == null) {
             callback.onError("No active Bluetooth connection.");
@@ -377,6 +356,8 @@ public class DeviceSettingsManager {
         }
     }
 
+    ///end mobile auth
+
     /**
      * **🔹  SVR_CHR_OTA_CONTROL_DONE  **
      */
@@ -415,161 +396,10 @@ public class DeviceSettingsManager {
         } else {
             callback.onSuccess("OTA control done sent.");
         }
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
     }
-
-
-    /**
-     * Sets the system mode of the remote ringer device.
-     *
-     * @param callback   The callback to handle the operation results
-     */
-
-
-    public void RemoteRinger_SkipProvision( RingerCallbacks.SkipProvisionCallBack callback) {
-
-        byte[] payload = RemoteRingerCommand.setSingleByteCommand(setSystemProvisionMode);
-        byte[] frame = buildCommandFrame(setSystemModeCommand, payload);
-        commandCallbackMap.put(setSystemModeCommand, callback);
-
-
-        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
-            @Override
-            public void onSuccess(String message) {
-                // You could trigger timeout/failure logic here if needed
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setSystemModeCommand);
-                if (cb != null) cb.onError(errorMessage);
-            }
-        }, "RemoteRinger_setSkipProvisionSystemMode");
-
-    }
-
-    /**
-     * Performs RemoteRinger_reProvision.
-     * @param ssid    The door lock ID to set
-     * @param password The encryption key to set
-     * @param callback      The callback to handle the operation results
-     */
-
-    public void RemoteRinger_ReProvision(String ssid, String password, RingerCallbacks.ReProvisionCallBack callback) {
-
-        bleResponseHandler.setReProvisionCallback(callback);
-
-        RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
-            @Override
-            public void onSuccess(String systemMode) {
-                reProvisionMode= Integer.valueOf(systemMode);
-                Log.d(TAG, "Fetched System Boot Mode: " + reProvisionMode);
-
-                // Step 2: Now decide based on value of systemMode
-                if (!"2".equals(systemMode)) {
-                    // Not in mode 2, so set it first
-                    RemoteRinger_setSystemMode(2, new RingerCallbacks.SystemModeCallback() {
-                        @Override
-                        public void onSuccess(String message) {
-                            Log.d(TAG, "System mode set to 2: " + message);
-                            setWiFiCredentials_ReProvision(callback, ssid, password);
-                        }
-
-                        @Override
-                        public void onError(String errorMessage) {
-                            Log.e(TAG, "Failed to set system mode: " + errorMessage);
-                            callback.onError("Failed at System Mode: " + errorMessage);
-                        }
-                    });
-                } else {
-                    Log.d(TAG, "System already in mode 2. Proceeding to set WiFi credentials...");
-                    setWiFiCredentials_ReProvision(callback, ssid, password);
-                }
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                Log.e(TAG, "Failed to get system mode: " + errorMessage);
-                callback.onError("Failed to get System Mode: " + errorMessage);
-            }
-        });
-
-    }
-    private void setWiFiCredentials_ReProvision(RingerCallbacks.ReProvisionCallBack callback, String ssid, String password) {
-        RemoteRinger_setWifiSsid(ssid, new RingerCallbacks.WiFiSSIDCallback() {
-            @Override
-            public void onSuccess(String message) {
-                Log.d(TAG, "SSID set successfully: " + message);
-
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    RemoteRinger_setWifiPass(password, new RingerCallbacks.WifiPasswordcallback() {
-                        @Override
-                        public void onSuccess(String message) {
-                            Log.d(TAG, "WiFi Password set successfully: " + message);
-
-                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                                RemoteRinger_wifiActivation(1, new RingerCallbacks.WifiActivationCallback() {
-                                    @Override
-                                    public void onSuccess(String message) {
-                                        // Log.d(TAG, "WiFi Activated: " + message);
-                                        //callback.onSuccess("Wifi Credentials Set Successfully!");
-                                        if(reProvisionMode>2) {
-                                            RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
-                                                @Override
-                                                public void onSuccess(String message) {
-                                                    callback.onSuccess("ReProvision Done");
-                                                }
-
-                                                @Override
-                                                public void onError(String errorMessage) {
-
-                                                }
-                                            });
-                                        }else{
-                                            callback.onSuccess("ReProvision is not allowed");
-                                        }
-                                    }
-
-                                    @Override
-                                    public void onError(String errorMessage) {
-                                        //Log.e(TAG, "Failed to activate WiFi: " + errorMessage);
-                                        // callback.onError("WiFi Activation Failed: " + errorMessage);
-                                        if(reProvisionMode>2) {
-                                            RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
-                                                @Override
-                                                public void onSuccess(String message) {
-                                                    callback.onSuccess("ReProvision Done");
-                                                }
-
-                                                @Override
-                                                public void onError(String errorMessage) {
-
-                                                }
-                                            });
-                                        }else{
-                                            callback.onSuccess("Retain State is not allowed");
-                                        }
-                                    }
-                                });
-                            }, 1000);
-                        }
-
-                        @Override
-                        public void onError(String errorMessage) {
-                            // Log.e(TAG, "Failed to set WiFi password: " + errorMessage);
-                            // callback.onError("Failed to set WiFi Password: " + errorMessage);
-                        }
-                    });
-                }, 1000);
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                Log.e(TAG, "Failed to set SSID: " + errorMessage);
-                callback.onError("Failed to set SSID: " + errorMessage);
-            }
-        });
-    }
-
 
     /**
      * **🔹  String convert into the integer value   **
@@ -593,7 +423,6 @@ public class DeviceSettingsManager {
         return String.join(".", parts);
     }
 
-
     public static String convertFirmwareVersionFormat(String decimalString) {
         int value = Integer.parseInt(decimalString);
         String hex = String.format("%06X", value); // Ensure 6 hex digits
@@ -607,8 +436,6 @@ public class DeviceSettingsManager {
         return convertToVersionFormat(String.valueOf(reversedValue));
     }
 
-    // [Additional methods would follow the same pattern with Javadoc comments]
-
     /**
      * **🔹  2 byte value convert into the integer   **
      */
@@ -621,6 +448,194 @@ public class DeviceSettingsManager {
         return ((data[0] & 0xFF) << 8) | (data[1] & 0xFF);
     }
 
+    public static int convertOneByteToInt(byte[] data) {
+        if (data == null || data.length != 1) {
+            throw new IllegalArgumentException("Byte array must be exactly 1 byte.");
+        }
+
+        return data[0] & 0xFF;
+    }
+
+    //added for hmac mobile auth
+    public long getRandomNumber() {
+        return Integer.toUnsignedLong(new Random().nextInt());
+    }
+
+    public byte[] getSecretKey() {
+        return new byte[32]; // 32 zero bytes
+    }
+
+    public byte[] hmacSHA256(byte[] key, String message) {
+        try {
+            SecretKeySpec secretKeySpec = new SecretKeySpec(key, "HmacSHA256");
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(secretKeySpec);
+            return mac.doFinal(message.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            throw new RuntimeException("Failed to calculate HMAC SHA256", e);
+        }
+    }
+
+    //new hmac auth
+    public byte[] preparePayloadForAuthRequest() {
+        long mobileNonce = getRandomNumber();
+        Log.d("AuthUtils", "mobile_nonce: " + mobileNonce);
+        Constant_Variable.locallyGeneratedRandomNo = mobileNonce;
+
+        // Convert to 8-character uppercase hex string
+        String hexString = String.format(Locale.US, "%08X", mobileNonce);
+
+        // Reverse the string in 2-character chunks
+        List<String> bytePairs = new ArrayList<>();
+        for (int i = 0; i < hexString.length(); i += 2) {
+            bytePairs.add(hexString.substring(i, i + 2));
+        }
+        Collections.reverse(bytePairs);
+        String reversedHex = String.join("", bytePairs);
+
+        // Prepend "0000"
+        String dataR = "0000" + reversedHex;
+
+        // Convert hex string to byte array
+        byte[] actualData = hexStringToBytes(dataR);
+        Log.d("AuthUtils", "actualData: " + bytesToHex(actualData));
+
+        return actualData;
+    }
+
+    private byte[] hexStringToBytes(String hex) {
+        int len = hex.length();
+        byte[] data = new byte[len / 2];
+
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
+                    + Character.digit(hex.charAt(i + 1), 16));
+        }
+        return data;
+    }
+
+    private String bytesToHex(byte[] bytes) {
+        StringBuilder hexStr = new StringBuilder();
+        for (byte b : bytes) {
+            hexStr.append(String.format("%02X", b));
+        }
+        return hexStr.toString();
+    }
+
+    /**
+     * Sets the system mode of the remote ringer device.
+     *
+     * @param callback The callback to handle the operation results
+     */
+
+
+   /* public void RemoteRinger_SkipProvision(RingerCallbacks.SkipProvisionCallBack callback) {
+
+        byte[] payload = RemoteRingerCommand.setSingleByteCommand(setSystemProvisionMode);
+        byte[] frame = buildCommandFrame(setSystemModeCommand, payload);
+        commandCallbackMap.put(setSystemModeCommand, callback);
+
+        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
+            @Override
+            public void onSuccess(String message) {
+                // You could trigger timeout/failure logic here if needed
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setSystemModeCommand);
+                if (cb != null) cb.onError(errorMessage);
+            }
+        }, "RemoteRinger_setSkipProvisionSystemMode");
+    }*/
+
+    // [Additional methods would follow the same pattern with Javadoc comments]
+
+    // for working open password Re provision
+
+    /*private void setWiFiCredentials_ReProvision(RingerCallbacks.ReProvisionCallBack callback, String ssid, String password) {
+        RemoteRinger_setWifiSsid(ssid, new RingerCallbacks.WiFiSSIDCallback() {
+            @Override
+            public void onSuccess(String message) {
+                Log.d(TAG, "SSID set successfully: " + message);
+
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    if (password == null || password.isEmpty()) {
+                        Log.d(TAG, "Password is empty. Skipping password step and activating WiFi.");
+                        activateWiFiAndMaybeSetMode(callback);
+                    } else if (password.length() >= 8) {
+                        RemoteRinger_setWifiPass(password, new RingerCallbacks.WifiPasswordcallback() {
+                            @Override
+                            public void onSuccess(String message) {
+                                Log.d(TAG, "WiFi Password set successfully: " + message);
+                                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                    activateWiFiAndMaybeSetMode(callback);
+                                }, 1000);
+                            }
+
+                            @Override
+                            public void onError(String errorMessage) {
+                                Log.e(TAG, "Failed to set WiFi password: " + errorMessage);
+                                callback.onError("Failed to set WiFi Password: " + errorMessage);
+                            }
+                        });
+                    } else {
+                        callback.onError("Password must be at least 8 characters.");
+                    }
+                }, 1000);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to set SSID: " + errorMessage);
+                callback.onError("Failed to set SSID: " + errorMessage);
+            }
+        });
+    }
+
+    private void activateWiFiAndMaybeSetMode(RingerCallbacks.ReProvisionCallBack callback) {
+        RemoteRinger_wifiActivation(1, new RingerCallbacks.WifiActivationCallback() {
+            @Override
+            public void onSuccess(String message) {
+                if (reProvisionMode > 2) {
+                    RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            callback.onSuccess("ReProvision Done");
+                        }
+
+                        @Override
+                        public void onError(String errorMessage) {
+                            callback.onError("Failed to set system mode: " + errorMessage);
+                        }
+                    });
+                } else {
+                    callback.onSuccess("ReProvision is not allowed");
+                }
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                if (reProvisionMode > 2) {
+                    RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            callback.onSuccess("ReProvision Done");
+                        }
+
+                        @Override
+                        public void onError(String errorMessage) {
+                            callback.onError("Failed to set system mode: " + errorMessage);
+                        }
+                    });
+                } else {
+                    callback.onSuccess("Retain State is not allowed");
+                }
+            }
+        });
+    }*/
+
+
     /**
      * **🔹 if successfully notification return bleResponseHandler **
      */
@@ -631,53 +646,6 @@ public class DeviceSettingsManager {
     /**
      * **🔹 for the authentication of serialnumber **
      */
-
-
-    //old auth
-//    public void RemoteRinger_Authentication(String ringerSerialNo, RingerCallbacks.AuthenticationCallback callback) {
-//        ringerSerialNo = Constant_Variable.serialNumber;
-//        String serialNumber = ringerSerialNo.replaceFirst("GRR_", "");
-//        Log.d(TAG, "Ringer serial number " + serialNumber);
-//        BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
-//        if (bluetoothGatt == null) {
-//            callback.onError("No active Bluetooth connection.");
-//            return;
-//        }
-//
-//        BluetoothGattService service = bluetoothGatt.getService(UUID.fromString(String.valueOf(SERVICE_UUID)));
-//        if (service == null) {
-//            new Handler(Looper.getMainLooper()).postDelayed(() -> RemoteRinger_Authentication(serialNumber, callback), 3000);
-//            return;
-//        }
-//
-//        BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID)));
-//        if (characteristic == null) {
-//            callback.onError("Characteristic not found.");
-//            return;
-//        }
-//
-//        byte requestId = RemoteRingerCommand.getNextRequestId(context);
-//        Log.e(TAG, "RemoteRinger_mobileAuthentication Request Id" + requestId);
-//
-//        byte[] commandFrame = RemoteRingerCommand.createCommandFrame(frameType, mobileAuthCommand, (byte) requestId, Host_ID,
-//                RemoteRingerCommand.RemoteRinger_setMethodVariableSize(serialNumber));
-//
-//        characteristic.setValue(commandFrame);
-//        characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-//
-//        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-//            return;
-//        }
-//        boolean writeSuccess = bluetoothGatt.writeCharacteristic(characteristic);
-//        if (!writeSuccess) {
-//            callback.onError("Failed to write Mobile Authentication command");
-//        } else {
-//            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-//                callback.onSuccess("Mobile Auth: "+getResponseOk);
-//            }, 1000);
-//        }
-//    }
-
 
     //new hmac auth
     public void RemoteRinger_Authentication(String ringerSerialNo, RingerCallbacks.AuthenticationCallback callback) {
@@ -698,21 +666,21 @@ public class DeviceSettingsManager {
             public void onSuccess(String message) {
                 // Delay the success callback by 1 second as in original
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    callback.onSuccess("Mobile Auth: "+getResponseOk);
+                    callback.onSuccess("Mobile Auth: " + getResponseOk);
                 }, 1000);
             }
 
             @Override
             public void onError(String errorMessage) {
 
-                callback.onError("Mobile Auth Error: "+errorMessage);
+                callback.onError("Mobile Auth Error: " + errorMessage);
             }
         }, "RemoteRinger_Authentication");
     }
 
     public void RemoteRinger_SendHmacResponse(RingerCallbacks.AuthenticationCallback callback) {
         byte[] payload = actualHmacData; // Placeholder for WiFi SSID request
-        byte[] frame = buildCommandFrame(mobileAuthCommand,payload);
+        byte[] frame = buildCommandFrame(mobileAuthCommand, payload);
 
 
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
@@ -726,7 +694,56 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(getWifiSSIDCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_GetWiFiSSID");
+        }, "RemoteRinger_GetWiFiSSID");
+    }
+
+    /**
+     * Sets the system mode of the remote ringer device.
+     *
+     * @param secretKey The system mode to set (numeric value)
+     * @param callback   The callback to handle the operation results
+     */
+
+
+    public void RemoteRinger_SecretKey(String secretKey, RingerCallbacks.AuthenticationCallback callback) {
+        // Validate: must be 128 hex characters => 64 bytes
+        if (secretKey == null) {
+            if (callback != null) {
+                callback.onError("Invalid secret key. Must be a 128-character hexadecimal string representing 64 bytes.");
+            }
+            return;
+        }
+
+        byte[] payload = getSecretKeyFromHexString(secretKey);
+        byte[] frame = buildCommandFrame(secretKeyMobileAuthCommand, payload);
+        commandCallbackMap.put(secretKeyMobileAuthCommand, callback);
+
+
+        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
+            @Override
+            public void onSuccess(String message) {
+                // You could trigger timeout/failure logic here if needed
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(secretKeyMobileAuthCommand);
+                if (cb != null) cb.onError(errorMessage);
+            }
+        }, "RemoteRinger_SecretKey");
+
+    }
+
+    public byte[] getSecretKeyFromHexString(String hexString) {
+        int len = hexString.length();
+        if (len % 2 != 0) throw new IllegalArgumentException("Hex string must have even length");
+
+        byte[] key = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            key[i / 2] = (byte) ((Character.digit(hexString.charAt(i), 16) << 4)
+                    + Character.digit(hexString.charAt(i + 1), 16));
+        }
+        return key;
     }
 
     /**
@@ -759,14 +776,12 @@ public class DeviceSettingsManager {
 
     }
 
-
     /**
      * Sets the system mode of the remote ringer device.
      *
      * @param systemMode The system mode to set (numeric value)
      * @param callback   The callback to handle the operation results
      */
-
 
 
     public void RemoteRinger_setSystemMode1(int systemMode, RingerCallbacks.SystemModeCallback callback) {
@@ -789,7 +804,7 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_setSystemMode1");
     }
 
-    public void RemoteRinger_deviceCommissioning( RingerCallbacks.SystemModeCallback callback) {
+    public void RemoteRinger_deviceCommissioning(RingerCallbacks.SystemModeCallback callback) {
         byte[] payload = RemoteRingerCommand.setSingleByteCommand(1);
         byte[] frame = buildCommandFrame(setSystemModeCommand, payload);
         commandCallbackMap.put(setSystemModeCommand, callback);
@@ -809,7 +824,6 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_setSystemMode1");
     }
 
-
     /**
      * Gets the current system mode of the remote ringer device.
      *
@@ -818,11 +832,20 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_getSystemMode(RingerCallbacks.SystemModeCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] payload = new byte[]{0x00};
+        this.systemModeCallback = callback;
         byte[] frame = buildCommandFrame(getSystemModeCommand, payload);
         commandCallbackMap.put(getSystemModeCommand, callback);
-
-
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -837,7 +860,6 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_getSystemMode");
     }
 
-
     /**
      * Sets the WiFi SSID on the remote ringer device.
      *
@@ -847,23 +869,22 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_setWifiSsid(String wifiSsid, RingerCallbacks.WiFiSSIDCallback callback) {
-        if (wifiSsid.isEmpty()) {
-
-            new Handler(Looper.getMainLooper()).post(() ->
-                    Toast.makeText(context, "Error: SSID cannot be empty ", Toast.LENGTH_LONG).show()
-
-            );
-            return;
-        }
-
         byte[] payload = RemoteRingerCommand.RemoteRinger_setMethodVariableSize(wifiSsid);
         byte[] frame = buildCommandFrame(setWIFISSIDCommand, payload);
+
         // Save the callback in the map
         commandCallbackMap.put(setWIFISSIDCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
+
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
-                // You could trigger timeout/failure logic here if needed
+                // Optionally handle success logic
             }
 
             @Override
@@ -871,9 +892,8 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setWIFISSIDCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_setWifiSsid");
+        }, "RemoteRinger_setWifiSsid");
     }
-
 
     /**
      * Sets the WiFi password on the remote ringer device.
@@ -884,11 +904,6 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_setWifiPass(String wifiPass, RingerCallbacks.WifiPasswordcallback callback) {
-        if (wifiPass.isEmpty()) {
-            Toast.makeText(context, "Password cannot be empty", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         byte[] payload = RemoteRingerCommand.RemoteRinger_setMethodVariableSize(wifiPass);
         byte[] frame = buildCommandFrame(setWifiPassword, payload);
 
@@ -904,8 +919,47 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setWifiPassword);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_setWifiPass");
+        }, "RemoteRinger_setWifiPass");
     }
+
+    // working for open password concept
+
+   /* public void RemoteRinger_setWifiPass(String wifiPass, RingerCallbacks.WifiPasswordcallback callback) {
+        if (wifiPass == null) {
+            wifiPass = ""; // Treat null as open password
+        }
+
+        // If open password (empty string), skip other checks
+        if (!wifiPass.isEmpty()) {
+            if (wifiPass.length() < 8) {
+                callback.onError("Password must be at least 8 characters");
+                return;
+            }
+
+            if (wifiPass.length() > 32) {
+                callback.onError("Password must not exceed 32 characters");
+                return;
+            }
+        }
+
+        byte[] payload = RemoteRingerCommand.RemoteRinger_setMethodVariableSize(wifiPass);
+        byte[] frame = buildCommandFrame(setWifiPassword, payload);
+
+        commandCallbackMap.put(setWifiPassword, callback);
+        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
+            @Override
+            public void onSuccess(String message) {
+                // Optional: success handling
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setWifiPassword);
+                if (cb != null) cb.onError(errorMessage);
+            }
+        }, "RemoteRinger_setWifiPass");
+    }*/
+
 
     /**
      * Activates or deactivates WiFi on the remote ringer device.
@@ -914,9 +968,37 @@ public class DeviceSettingsManager {
      * @param callback           The callback to handle the operation results
      */
 
+    // OLD CODE IS WORKING version 0.1.13
 
-    public void RemoteRinger_wifiActivation(int wifiActivationMode, RingerCallbacks.WifiActivationCallback callback) {
+
+    /*public void RemoteRinger_wifiActivation(int wifiActivationMode, RingerCallbacks.WifiActivationCallback callback) {
         byte[] payload = RemoteRingerCommand.setSingleByteCommand(wifiActivationMode);
+        byte[] frame = buildCommandFrame(setWifiActivationCommand, payload);
+
+        commandCallbackMap.put(setWifiActivationCommand, callback);
+        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
+            @Override
+            public void onSuccess(String message) {
+                // You could trigger timeout/failure logic here if needed
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setWifiActivationCommand);
+                if (cb != null) cb.onError(errorMessage);
+            }
+        }, "RemoteRinger_wifiActivation");
+    }*/
+
+    // new code added by susheel 13-06-2025
+
+    public void RemoteRinger_wifiActivation(int wifiActivationMode,int onProvisioningType, RingerCallbacks.WifiActivationCallback callback) {
+
+        Constant_Variable.getOnProvisioningType = onProvisioningType;
+        Log.d(TAG, "onProvisioningType DeviceSettingManager: " + onProvisioningType);
+
+        byte[] payload = RemoteRingerCommand.setTwoByteCommandType(wifiActivationMode, onProvisioningType);
+        Log.d(TAG, "onProvisioningType Payload Length: " + payload.length);
         byte[] frame = buildCommandFrame(setWifiActivationCommand, payload);
 
         commandCallbackMap.put(setWifiActivationCommand, callback);
@@ -935,6 +1017,32 @@ public class DeviceSettingsManager {
     }
 
     /**
+     * Abort activation WiFi on the remote ringer device.
+     *
+     * @param callback                The callback to handle the operation results
+     */
+
+    public void RemoteRinger_AbortProvisioning(RingerCallbacks.WifiActivationCallback callback) {
+        BleResponseHandler.cancelTimeout();
+        byte[] payload = RemoteRingerCommand.setSingleByteCommandType(Constant_Variable.wifiActivationModeAbort, 0);
+        byte[] frame = buildCommandFrame(setWifiActivationCommand, payload);
+
+        commandCallbackMap.put(setWifiActivationCommand, callback);
+        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
+            @Override
+            public void onSuccess(String message) {
+                // You could trigger timeout/failure logic here if needed
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setWifiActivationCommand);
+                if (cb != null) cb.onError(errorMessage);
+            }
+        }, "RemoteRinger_wifiActivationAbort");
+    }
+
+    /**
      * Sets the door lock ID on the remote ringer device.
      *
      * @param doorLockId The door lock ID to set
@@ -943,8 +1051,19 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_SetDoorLockId(String doorLockId, RingerCallbacks.DoorLockIDCallback callback) {
-        if (doorLockId.isEmpty()) {
-            Toast.makeText(context, "DoorLockId cannot be empty", Toast.LENGTH_SHORT).show();
+        if (doorLockId == null || doorLockId.isEmpty()) {
+            callback.onError("Error: DoorLockId cannot be empty");
+            return;
+        }
+
+        if (doorLockId.length() < 3) {
+            callback.onError("Error: DoorLockId must be at least 3 characters long");
+            return;
+        }
+
+        // Check if UTF-8 encoded byte length exceeds 16
+        if (doorLockId.getBytes(StandardCharsets.UTF_8).length > 16) {
+            callback.onError("Error: DoorLockId must be 16 bytes or less");
             return;
         }
 
@@ -963,9 +1082,8 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setDoorLockIdCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_SetDoorLockId");
+        }, "RemoteRinger_SetDoorLockId");
     }
-
 
     /**
      * Sets the serial number on the remote ringer device.
@@ -977,7 +1095,7 @@ public class DeviceSettingsManager {
 
     public void RemoteRinger_setSerialNumber(String serialNumber, RingerCallbacks.SerialNumberCallback callback) {
         if (serialNumber.isEmpty()) {
-            Toast.makeText(context, "SerialNumber cannot be empty", Toast.LENGTH_SHORT).show();
+            callback.onError("SerialNumber cannot be empty");
             return;
         }
 
@@ -985,6 +1103,12 @@ public class DeviceSettingsManager {
         byte[] frame = buildCommandFrame(setSerialCommand, payload);
 
         commandCallbackMap.put(setSerialCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
 
 
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
@@ -1008,10 +1132,20 @@ public class DeviceSettingsManager {
      */
 
     public void RemoteRinger_RebootDevice(RingerCallbacks.RebootCallback callback) {
+        BleResponseHandler.cancelTimeout();
+        Constant_Variable.getProvisionState = 0;
+        Constant_Variable.getOnboardingState = 0;
+        isTriggerd=0;
         byte[] payload = new byte[]{0x00}; // Empty payload
         byte[] frame = buildCommandFrame(deviceRebootCommand, payload);
 
         commandCallbackMap.put(deviceRebootCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1026,7 +1160,6 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_RebootDevice");
     }
 
-
     /**
      * Performs a factory reset on the remote ringer device.
      *
@@ -1035,10 +1168,20 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_FactoryReset(RingerCallbacks.FactoryResetCallback callback) {
+        BleResponseHandler.cancelTimeout();
+        Constant_Variable.getProvisionState = 0;
+        Constant_Variable.getOnboardingState = 0;
+        isTriggerd=0;
         byte[] payload = new byte[]{0x00}; // No additional data
         byte[] frame = buildCommandFrame(FactoryResetCommand, payload);
 
         commandCallbackMap.put(FactoryResetCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1050,9 +1193,8 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(FactoryResetCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_FactoryReset");
+        }, "RemoteRinger_FactoryReset");
     }
-
 
     /**
      * Sets the application boot mode on the remote ringer device.
@@ -1080,8 +1222,6 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_setApplicationBootMode");
     }
 
-
-
     /**
      * Sets the device model ID on the remote ringer device.
      *
@@ -1093,7 +1233,6 @@ public class DeviceSettingsManager {
 
         if (modelID < 0 || modelID > 65535) {
             callback.onError("Enter valid value.");
-            Toast.makeText(context, "Enter valid value.", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -1101,6 +1240,12 @@ public class DeviceSettingsManager {
         byte[] frame = buildCommandFrame(setDeviceModelId, payload);
 
         commandCallbackMap.put(setDeviceModelId, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1112,9 +1257,8 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setDeviceModelId);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_setDeviceModelID");
+        }, "RemoteRinger_setDeviceModelID");
     }
-
 
     /**
      * Sets the hardware version on the remote ringer device.
@@ -1127,12 +1271,16 @@ public class DeviceSettingsManager {
 
     public void RemoteRinger_setHardwareVersion(int major, int minor, int patch, RingerCallbacks.HardwareVersionCallback callback) {
 
-
-
         byte[] payload = RemoteRingerCommand.RemoteRinger_setHardwareVersion(major, minor, patch);
         byte[] frame = buildCommandFrame(setHardWareCommand, payload);
 
         commandCallbackMap.put(setHardWareCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1147,44 +1295,16 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_setHardwareVersion");
     }
 
-
-    /**
-     * Sets the door lock BLE address on the remote ringer device.
-     *
-     * @param bleAddress The BLE address to set
-     * @param callback   The callback to handle the operation results
-     */
-
-   /* public void RemoteRinger_setDoorLockBleAddress(String bleAddress, RingerCallbacks.DoorLockBleAddressCallback callback) {
-        if (bleAddress == null || bleAddress.length() < 12) {
-            bleAddress = "000000000000";
-        }
-
-        byte[] payload = RemoteRingerCommand.RemoteRinger_setMethodVariableSizes(bleAddress);
-        byte[] frame = buildCommandFrame(setDoorLockBleMacCommand, payload);
-
-        commandCallbackMap.put(setDoorLockBleMacCommand, callback);
-        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
-            @Override
-            public void onSuccess(String message) {
-                // You could trigger timeout/failure logic here if needed
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setDoorLockBleMacCommand);
-                if (cb != null) cb.onError(errorMessage);
-            }
-        }, "RemoteRinger_setDoorLockBleAddress");
-    }
-*/
-
     public void RemoteRinger_setDoorLockBleAddress(String bleAddress, RingerCallbacks.DoorLockBleAddressCallback callback) {
         if (bleAddress == null) {
             if (callback != null) {
                 callback.onError("BLE address is null.");
             }
             return;
+        }
+        // Must be 12 hex characters after formatting
+        if (bleAddress.length() != 12 || !bleAddress.matches("[0-9A-F]{12}")) {
+            callback.onError("Invalid BLE MAC address. Expected 12 hexadecimal characters (e.g., 001A7DDA7113 or 00:1A:7D:DA:71:13).");
         }
 
         byte[] payload;
@@ -1214,8 +1334,6 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_setDoorLockBleAddress");
     }
 
-
-
     /**
      * Sets the door lock encryption key on the remote ringer device.
      *
@@ -1225,8 +1343,10 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_setDoorLockEncryptionKey(String doorLockEncryptionKey, RingerCallbacks.DoorLockEncryptionKey callback) {
-        if (doorLockEncryptionKey == null || doorLockEncryptionKey.length() < 32) {
-            doorLockEncryptionKey = "00000000000000000000000000000000";
+
+        if (doorLockEncryptionKey == null || doorLockEncryptionKey.length() < 5 || doorLockEncryptionKey.getBytes(StandardCharsets.US_ASCII).length < 32) {
+            callback.onError("Error: Encryption key must be at least 5 characters and less than 32 bytes");
+            return;
         }
 
         byte[] payload = doorLockEncryptionKey.getBytes(StandardCharsets.US_ASCII);
@@ -1244,7 +1364,7 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(setDoorLockEncryptionKeyCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_setDoorLockEncryptionKey");
+        }, "RemoteRinger_setDoorLockEncryptionKey");
     }
 
     /**
@@ -1254,10 +1374,10 @@ public class DeviceSettingsManager {
      * @param callback       The callback to handle the operation results
      */
 
-    public void RemoteRinger_setOnBoardingActivation(int onBoardingMode, int onBoardingType,  RingerCallbacks.OnBoardingActivationCallback callback) {
+    public void RemoteRinger_setOnBoardingActivation(int onBoardingMode, int onBoardingType, RingerCallbacks.OnBoardingActivationCallback callback) {
         Constant_Variable.getOnBoardingType = onBoardingType;
         Log.d(TAG, "onBoardingType DeviceSettingManager: " + onBoardingType);
-        byte[] payload = RemoteRingerCommand.setSingleByteCommandType(onBoardingMode,onBoardingType);
+        byte[] payload = RemoteRingerCommand.setSingleByteCommandType(onBoardingMode, onBoardingType);
         byte[] frame = buildCommandFrame(onBoardingActivationCommand, payload);
 
         commandCallbackMap.put(onBoardingActivationCommand, callback);
@@ -1272,9 +1392,41 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(onBoardingActivationCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_setOnBoardingActivation");
+        }, "RemoteRinger_setOnBoardingActivation");
     }
 
+    /**
+     * Sets the RemoteRinger_AbortOnBoarding status on the remote ringer device.
+     *
+     * @param callback       The callback to handle the operation results
+     */
+
+    public void RemoteRinger_AbortOnBoarding(RingerCallbacks.OnBoardingActivationCallback callback) {
+        BleResponseHandler.cancelTimeout();
+        Integer OnBoarding_type=Constant_Variable.getOnBoardingType;
+        if (OnBoarding_type == null) {
+            Log.e(TAG, "OnBoarding_type is null. Aborting command.");
+            if (callback != null) callback.onError("OnBoarding_type is null");
+            return;
+        }
+
+        byte[] payload = RemoteRingerCommand.setSingleByteCommandType(abortOnBoardingActivation,OnBoarding_type);
+        byte[] frame = buildCommandFrame(onBoardingActivationCommand, payload);
+
+        commandCallbackMap.put(onBoardingActivationCommand, callback);
+        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
+            @Override
+            public void onSuccess(String message) {
+                // You could trigger timeout/failure logic here if needed
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(onBoardingActivationCommand);
+                if (cb != null) cb.onError(errorMessage);
+            }
+        }, "RemoteRinger_setOnBoardingActivationAbort");
+    }
 
     /**
      * Confirms successful onboarding of the remote ringer device.
@@ -1299,9 +1451,8 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(onBoardingActivationCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_OnBoardingSuccess");
+        }, "RemoteRinger_OnBoardingSuccess");
     }
-
 
     /**
      * Gets the serial number from the remote ringer device.
@@ -1310,6 +1461,10 @@ public class DeviceSettingsManager {
      */
 
     public void RemoteRinger_getSerialNumber(RingerCallbacks.SerialNumberCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] payload = new byte[12]; // Empty payload for serial number request
         byte[] frame = buildCommandFrame(getSerialNumberCommand, payload);
 
@@ -1326,7 +1481,8 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(getSerialNumberCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_getSerialNumber");
+        }, "RemoteRinger_getSerialNumber");
+
     }
 
     /**
@@ -1335,15 +1491,17 @@ public class DeviceSettingsManager {
      * @param callback The callback to handle the operation results
      */
 
-
-
-
     public void RemoteRinger_GetHardwareVersion(RingerCallbacks.HardwareVersionCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
 
         byte[] payload = new byte[]{0x00};
         byte[] frame = buildCommandFrame(getHardwareVersionCommand, payload);
 
         commandCallbackMap.put(getHardwareVersionCommand, callback);
+
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1356,9 +1514,8 @@ public class DeviceSettingsManager {
                 if (cb != null) cb.onError(errorMessage);
             }
         }, "RemoteRinger_GetHardwareVersion");
+
     }
-
-
 
     /**
      * Gets the firmware version from the remote ringer device.
@@ -1367,6 +1524,10 @@ public class DeviceSettingsManager {
      */
 
     public void RemoteRinger_GetFirmwareVersion(RingerCallbacks.FirmwareVersionCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] payload = new byte[]{0x00}; // Used to request firmware version
         byte[] frame = buildCommandFrame(getFarmWareVersionCommand, payload);
 
@@ -1382,7 +1543,7 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(getFarmWareVersionCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_GetFirmwareVersion");
+        }, "RemoteRinger_GetFirmwareVersion");
     }
 
     /**
@@ -1392,6 +1553,10 @@ public class DeviceSettingsManager {
      */
 
     public void RemoteRinger_GetApplicationBootMode(RingerCallbacks.BootModeCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         this.getBootModeCallback = callback;
         byte[] payload = new byte[]{0x00}; // Payload to request application boot mode
         byte[] frame = buildCommandFrame(getApplicationBootModeCommand, payload);
@@ -1409,6 +1574,7 @@ public class DeviceSettingsManager {
                 if (cb != null) cb.onError(errorMessage);
             }
         }, "RemoteRinger_GetApplicationBootMode");
+
     }
 
     /**
@@ -1418,7 +1584,11 @@ public class DeviceSettingsManager {
      */
 
     public void RemoteRinger_GetDeviceModelID(RingerCallbacks.DeviceModelCallback callback) {
-        this.deviceModelCallback=callback;
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
+        this.deviceModelCallback = callback;
         byte[] payload = new byte[]{0x00}; // Request payload
         byte[] frame = buildCommandFrame(getDeviceModelIdCommand, payload);
 
@@ -1435,6 +1605,7 @@ public class DeviceSettingsManager {
                 if (cb != null) cb.onError(errorMessage);
             }
         }, "RemoteRinger_GetDeviceModelID");
+
     }
 
     /**
@@ -1445,6 +1616,10 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_GetWiFiSSID(RingerCallbacks.WiFiSSIDCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] payload = new byte[32]; // Placeholder for WiFi SSID request
         byte[] frame = buildCommandFrame(getWifiSSIDCommand, payload);
 
@@ -1460,9 +1635,9 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(getWifiSSIDCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_GetWiFiSSID");
-    }
+        }, "RemoteRinger_GetWiFiSSID");
 
+    }
 
     /**
      * Gets the door lock ID from the remote ringer device.
@@ -1490,7 +1665,6 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_GetDoorLockID");
     }
 
-
     /**
      * Plays a melody on the remote ringer device.
      *
@@ -1499,10 +1673,20 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_PlayMelody(RingerCallbacks.PlayMelodyCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] payload = new byte[]{0x00}; // payload for PlayMelody
         byte[] frame = buildCommandFrame(playAudioToneCommand, payload);
 
         commandCallbackMap.put(playAudioToneCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1514,10 +1698,8 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(playAudioToneCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_PlayMelody");
+        }, "RemoteRinger_PlayMelody");
     }
-
-
 
     /**
      * Stops the currently playing melody on the remote ringer device.
@@ -1527,10 +1709,20 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_StopMelody(RingerCallbacks.StopMelodyCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] payload = new byte[]{0x00}; // Payload for StopMelody
         byte[] frame = buildCommandFrame(stopAudioToneCommand, payload);
 
         commandCallbackMap.put(stopAudioToneCommand, callback);
+       /* BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1542,9 +1734,8 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(stopAudioToneCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_StopMelody");
+        }, "RemoteRinger_StopMelody");
     }
-
 
     /**
      * Sets the melody volume on the remote ringer device.
@@ -1555,6 +1746,10 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_SetMelodyVolume(int volumeLevel, RingerCallbacks.VolumeCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         if (volumeLevel < 0 || volumeLevel > 255) {
             if (callback != null) {
                 callback.onError("Volume value must fit within one byte.");
@@ -1565,6 +1760,12 @@ public class DeviceSettingsManager {
         byte[] frame = buildCommandFrame(setVolumeLevelCommand, payload);
 
         commandCallbackMap.put(setVolumeLevelCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1587,9 +1788,19 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_IncrementMelodyVolume(RingerCallbacks.VolumeCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] frame = buildCommandFrame(incrementVolumeLevelCommand, new byte[]{0x00});
-
         commandCallbackMap.put(incrementVolumeLevelCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
+
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1601,17 +1812,28 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(incrementVolumeLevelCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_IncrementMelodyVolume");
+        }, "RemoteRinger_IncrementMelodyVolume");
     }
 
     public void RemoteRinger_DecrementMelodyVolume(RingerCallbacks.VolumeCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] frame = buildCommandFrame(decrementVolumeLevelCommand, new byte[]{0x00});
-
         commandCallbackMap.put(decrementVolumeLevelCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
+
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
                 // You could trigger timeout/failure logic here if needed
+                Log.e("Success", "Success" + message);
             }
 
             @Override
@@ -1629,28 +1851,20 @@ public class DeviceSettingsManager {
      */
 
 
-    /*public void GetMelodyVolumeLevel(RingerCallbacks.VolumeCallback callback) {
-        byte[] frame = buildCommandFrame(getVolumeLevelCommand, new byte[]{0x00});
-
-        commandCallbackMap.put(getVolumeLevelCommand, callback);
-        sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
-            @Override
-            public void onSuccess(String message) {
-                // You could trigger timeout/failure logic here if needed
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(getVolumeLevelCommand);
-                if (cb != null) cb.onError(errorMessage);
-            }
-        },"RemoteRinger_GetVolumeMelodyLevel");
-    }*/
-
     public void RemoteRinger_GetVolumeMelodyLevel(RingerCallbacks.VolumeLevelCallback callback) {
-        this.volumelevelCallback = callback;
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
+
         byte[] frame = buildCommandFrame(getVolumeLevelCommand, new byte[]{0x00});
-//        commandCallbackMap.put(getVolumeLevelCommand, callback);
+         commandCallbackMap.put(getVolumeLevelCommand, callback);
+       /* BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1662,9 +1876,9 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(getVolumeLevelCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_GetVolumeMelodyLevel");
-    }
+        }, "RemoteRinger_GetVolumeMelodyLevel");
 
+    }
 
     /**
      * Plays the next audio tone on the remote ringer device.
@@ -1674,9 +1888,19 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_NextMelodyAudioTone(RingerCallbacks.VolumeCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] frame = buildCommandFrame(nextAudioToneCommand, new byte[]{0x00});
 
         commandCallbackMap.put(nextAudioToneCommand, callback);
+       /* BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1691,7 +1915,6 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_NextMelodyAudioTone");
     }
 
-
     /**
      * Plays the previous audio tone on the remote ringer device.
      *
@@ -1700,9 +1923,19 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_PreviousMelodyAudioTone(RingerCallbacks.VolumeCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] frame = buildCommandFrame(previousAudioToneCommand, new byte[]{0x00});
 
         commandCallbackMap.put(previousAudioToneCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1714,18 +1947,21 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(previousAudioToneCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_PreviousMelodyAudioTone");
+        }, "RemoteRinger_PreviousMelodyAudioTone");
     }
-
 
     /**
      * Previews an audio tone on the remote ringer device.
      *
-     * @param insertPreviewAudioTone The ID of the audio tone to preview
-     * @param callback               The callback to handle the operation results
+     * @param tone     The ID of the audio tone to preview
+     * @param callback The callback to handle the operation results
      */
 
     public void RemoteRinger_PreviewMelodyAudioTone(int tone, RingerCallbacks.VolumeCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         if (tone < 0 || tone > 255) {
             if (callback != null) {
                 callback.onError("Tone value must fit within one byte.");
@@ -1736,6 +1972,12 @@ public class DeviceSettingsManager {
         byte[] payload = RemoteRingerCommand.setSingleByteCommand(tone);
         byte[] frame = buildCommandFrame(previewAudioToneCommand, payload);
         commandCallbackMap.put(previewAudioToneCommand, callback);
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1766,20 +2008,22 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(getDoorLockEncryptionKeyCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_getDoorLockEncryptionKey");
+        }, "RemoteRinger_getDoorLockEncryptionKey");
     }
-
 
     /**
      * Sets the audio tone on the remote ringer device.
      *
-     * @param audioTone The ID of the audio tone to set
-     * @param callback  The callback to handle the operation results
+     * @param tone     The ID of the audio tone to set
+     * @param callback The callback to handle the operation results
      */
 
 
-
     public void RemoteRinger_SetMelody(int tone, RingerCallbacks.PlayMelodyCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         if (tone < 0 || tone > 255) {
             if (callback != null) {
                 callback.onError("Tone value must fit within one byte.");
@@ -1790,7 +2034,12 @@ public class DeviceSettingsManager {
         byte[] payload = RemoteRingerCommand.setSingleByteCommand(tone);
         byte[] frame = buildCommandFrame(setAudioToneCommand, payload);
         commandCallbackMap.put(setAudioToneCommand, callback);
-
+        /*BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
 
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
@@ -1807,48 +2056,11 @@ public class DeviceSettingsManager {
     }
 
     /**
-     * Gets the device activation status from the remote ringer device.
+     * Sets the device activation of the  ringer device.
      *
      * @param callback The callback to handle the operation results
      */
-   /* public void RemoteRinger_GetDeviceActivationStatus(RingerCallbacks.OnBoardingActivationCallback callback) {
-        BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
-        if (bluetoothGatt == null) {
-            callback.onError("No active Bluetooth connection.");
-            return;
-        }
 
-        BluetoothGattService service = bluetoothGatt.getService(UUID.fromString(String.valueOf(SERVICE_UUID)));
-        if (service == null) {
-            new Handler(Looper.getMainLooper()).postDelayed(() -> RemoteRinger_GetDeviceActivationStatus(callback), 3000);
-            return;
-        }
-
-        BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID)));
-        if (characteristic == null) {
-            callback.onError("Characteristic not found.");
-            return;
-        }
-
-        byte requestId = RemoteRingerCommand.getNextRequestId(context);
-        Log.e(TAG, "RemoteRinger_GetDeviceActivationStatus RequestId :" + requestId);
-
-        byte[] commandFrame = RemoteRingerCommand.createCommandFrame(frameType, getDeviceActivationStatusCommand, (byte) requestId, Host_ID, new byte[]{0x00});
-
-        characteristic.setValue(commandFrame);
-        characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
-        boolean writeSuccess = bluetoothGatt.writeCharacteristic(characteristic);
-        if (!writeSuccess) {
-            callback.onError("Failed to write RemoteRinger_GetDeviceActivationStatus command");
-        } else {
-            callback.onSuccess("RemoteRinger_GetDeviceActivationStatus Command Sent");
-        }
-    }
-*/
     public void RemoteRinger_GetDeviceActivationStatus(RingerCallbacks.OnBoardingActivationCallback callback) {
         byte[] frame = buildCommandFrame(getDeviceActivationStatusCommand, new byte[]{0x00});
 
@@ -1868,48 +2080,11 @@ public class DeviceSettingsManager {
     }
 
     /**
-     * Gets the door lock BLE address from the remote ringer device.
+     * get the door lock ble address of the  ringer device.
      *
      * @param callback The callback to handle the operation results
      */
-   /* public void RemoteRinger_getDoorLockBleAddress(RingerCallbacks.DoorLockBleAddressCallback callback) {
-        BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
-        if (bluetoothGatt == null) {
-            callback.onError("No active Bluetooth connection.");
-            return;
-        }
 
-        BluetoothGattService service = bluetoothGatt.getService(UUID.fromString(String.valueOf(SERVICE_UUID)));
-        if (service == null) {
-            new Handler(Looper.getMainLooper()).postDelayed(() -> RemoteRinger_getDoorLockBleAddress(callback), 3000);
-            return;
-        }
-
-        BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID)));
-        if (characteristic == null) {
-            callback.onError("Characteristic not found.");
-            return;
-        }
-
-        byte requestId = RemoteRingerCommand.getNextRequestId(context);
-        Log.e(TAG, "RemoteRinger_GetDeviceActivationStatus RequestId :" + requestId);
-
-        byte[] commandFrame = RemoteRingerCommand.createCommandFrame(frameType, getDoorLockBleMacCommand, (byte) requestId, Host_ID, new byte[32]);
-
-        characteristic.setValue(commandFrame);
-        characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
-        boolean writeSuccess = bluetoothGatt.writeCharacteristic(characteristic);
-        if (!writeSuccess) {
-            callback.onError("Failed to write RemoteRinger_getDoorLockBleAddress command");
-        } else {
-            callback.onSuccess("RemoteRinger_getDoorLockBleAddress Command Sent");
-        }
-    }
-*/
     public void RemoteRinger_getDoorLockBleAddress(RingerCallbacks.DoorLockBleAddressCallback callback) {
         byte[] frame = buildCommandFrame(getDoorLockBleMacCommand, new byte[32]);
 
@@ -1928,7 +2103,6 @@ public class DeviceSettingsManager {
         }, "RemoteRinger_getDoorLockBleAddress");
     }
 
-
     /**
      * Gets the current audio tone from the remote ringer device.
      *
@@ -1937,9 +2111,19 @@ public class DeviceSettingsManager {
 
 
     public void RemoteRinger_getAudioTone(RingerCallbacks.PlayMelodyCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         byte[] frame = buildCommandFrame(getAudioToneCommand, new byte[]{0x00});
 
         commandCallbackMap.put(getAudioToneCommand, callback);
+       /* BleResponseHandler.startBleResponseTimeout("❌ device is not responding", new ResponseCallback() {
+            @Override
+            public void onError(String error) {
+                Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
+            }
+        });*/
         sendBleCommand(frame, new RingerCallbacks.BaseCallback() {
             @Override
             public void onSuccess(String message) {
@@ -1953,52 +2137,7 @@ public class DeviceSettingsManager {
                 RingerCallbacks.BaseCallback cb = commandCallbackMap.remove(getAudioToneCommand);
                 if (cb != null) cb.onError(errorMessage);
             }
-        },"RemoteRinger_getAudioTone");
-    }
-
-
-    /**
-     * Unauthorizes the mobile device from the remote ringer.
-     *
-     * @param callback The callback to handle the operation results
-     */
-    public void RemoteRinger_MobileUnAuth(RingerCallbacks.MobileAunAuthCallback callback) {
-        BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
-        if (bluetoothGatt == null) {
-            callback.onError("No active Bluetooth connection.");
-            return;
-        }
-
-        BluetoothGattService service = bluetoothGatt.getService(UUID.fromString(String.valueOf(SERVICE_UUID)));
-        if (service == null) {
-            new Handler(Looper.getMainLooper()).postDelayed(() -> RemoteRinger_MobileUnAuth(callback), 3000);
-            return;
-        }
-
-        BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID)));
-        if (characteristic == null) {
-            callback.onError("Characteristic not found.");
-            return;
-        }
-
-        byte requestId = RemoteRingerCommand.getNextRequestId(context);
-        Log.e(TAG, "RemoteRinger_MobileUnAuth RequestId :" + requestId);
-
-        byte[] commandFrame = RemoteRingerCommand.createCommandFrame(frameType, MobileUnAuthCommand, (byte) requestId, Host_ID,
-                RemoteRingerCommand.RemoteRinger_setMethodVariableSize(serialNumber));
-
-        characteristic.setValue(commandFrame);
-        characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
-        boolean writeSuccess = bluetoothGatt.writeCharacteristic(characteristic);
-        if (!writeSuccess) {
-            callback.onError("Failed to write RemoteRinger_MobileUnAuth command");
-        } else {
-            callback.onSuccess("RemoteRinger_MobileUnAuth Command Sent");
-        }
+        }, "RemoteRinger_getAudioTone");
     }
 
     /**
@@ -2055,7 +2194,51 @@ public class DeviceSettingsManager {
     }
 */
 
-    ///wifi provision start here//
+    /**
+     * Unauthorizes the mobile device from the remote ringer.
+     *
+     * @param callback The callback to handle the operation results
+     */
+    public void RemoteRinger_MobileUnAuth(RingerCallbacks.MobileAunAuthCallback callback) {
+        BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
+        if (bluetoothGatt == null) {
+            callback.onError("No active Bluetooth connection.");
+            return;
+        }
+
+        BluetoothGattService service = bluetoothGatt.getService(UUID.fromString(String.valueOf(SERVICE_UUID)));
+        if (service == null) {
+            new Handler(Looper.getMainLooper()).postDelayed(() -> RemoteRinger_MobileUnAuth(callback), 3000);
+            return;
+        }
+
+        BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID)));
+        if (characteristic == null) {
+            callback.onError("Characteristic not found.");
+            return;
+        }
+
+        byte requestId = RemoteRingerCommand.getNextRequestId(context);
+        Log.e(TAG, "RemoteRinger_MobileUnAuth RequestId :" + requestId);
+
+        byte[] commandFrame = RemoteRingerCommand.createCommandFrame(frameType, MobileUnAuthCommand, (byte) requestId, Host_ID,
+                RemoteRingerCommand.RemoteRinger_setMethodVariableSize(serialNumber));
+
+        characteristic.setValue(commandFrame);
+        characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        boolean writeSuccess = bluetoothGatt.writeCharacteristic(characteristic);
+        if (!writeSuccess) {
+            callback.onError("Failed to write RemoteRinger_MobileUnAuth command");
+        } else {
+            callback.onSuccess("RemoteRinger_MobileUnAuth Command Sent");
+        }
+    }
+
+    /// wifi provision start here//
 //    public void RemoteRinger_setProvision(String ssid, String password, RingerCallbacks.ProvisionCallback callback) {
 //        bleResponseHandler.setProvisionCallback(callback);
 //
@@ -2110,49 +2293,108 @@ public class DeviceSettingsManager {
         new Handler(Looper.getMainLooper()).postDelayed(action, delayMillis);
     }
 
-
-
     //new chnages as per document
     public void RemoteRinger_setProvision(String ssid, String password, RingerCallbacks.ProvisionCallback callback) {
 
-        bleResponseHandler.setProvisionCallback(callback);
+        IsTriggerd=true;
+        // over wifi
+        // IsWifiOnBoardingState=true;
+        // over ble state
+        int state = getProvisionState;
 
-        RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
-            @Override
-            public void onSuccess(String systemMode) {
-                Log.d(TAG, "Fetched System Boot Mode: " + systemMode);
+        Log.d(TAG,"Provision State is :::::::::::::::::::::::::"+state);
 
-                // Step 2: Now decide based on value of systemMode
-                if (!"2".equals(systemMode)) {
-                    // Not in mode 2, so set it first
-                    RemoteRinger_setSystemMode(2, new RingerCallbacks.SystemModeCallback() {
-                        @Override
-                        public void onSuccess(String message) {
-                            Log.d(TAG, "System mode set to 2: " + message);
+        if (state == 1){
+            isTriggerd=0;
+            // isTriggerdWifiStatus=0;
+        }
+        else {
+            isTriggerd=1;
+            // isTriggerdWifiStatus=1;
+        }
+        Log.d("TAG", "RemoteRinger_Provision : " + state);
+
+        switch (isTriggerd) {
+            case 1:
+                bleResponseHandler.setProvisionCallback(callback);
+                if (ssid == null || ssid.isEmpty()) {
+                    callback.onError("Error: SSID cannot be empty");
+                    return;
+                }
+                if (ssid.getBytes(StandardCharsets.UTF_8).length < 2) {
+                    callback.onError("Error: SSID must be 2 bytes or less"); // ❌ Message is incorrect
+                    return;
+                }
+
+                // Check if SSID exceeds 32 bytes when encoded
+                if (ssid.getBytes(StandardCharsets.UTF_8).length > 32) {
+                    callback.onError("Error: SSID must be 32 bytes or less");
+                    return;
+                }
+                if (password == null || password.isEmpty()) {
+                    callback.onError("Password cannot be empty");
+                    return;
+                }
+
+                if (password.length() < 8) {
+                    callback.onError("Password must be at least 8 characters");
+                    return;
+                }
+
+                if (password.length() > 32) {
+                    callback.onError("Password must not exceed 32 characters");
+                    return;
+                }
+
+                RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
+                    @Override
+                    public void onSuccess(String systemMode) {
+                        Log.d(TAG, "Fetched System Boot Mode: " + systemMode);
+                        // Step 2: Now decide based on value of systemMode
+                        if (!"2".equals(systemMode)) {
+                            // Not in mode 2, so set it first
+                            RemoteRinger_setSystemMode(2, new RingerCallbacks.SystemModeCallback() {
+                                @Override
+                                public void onSuccess(String message) {
+                                    Log.d(TAG, "System mode set to 2: " + message);
+                                    setWiFiCredentials(callback, ssid, password);
+                                }
+
+                                @Override
+                                public void onError(String errorMessage) {
+                                    Log.e(TAG, "Failed to set system mode: " + errorMessage);
+                                    //callback.onError("Failed at System Mode: " + errorMessage);
+                                }
+                            });
+                        } else {
+                            Log.d(TAG, "System already in mode 2. Proceeding to set WiFi credentials...");
                             setWiFiCredentials(callback, ssid, password);
                         }
+                    }
 
-                        @Override
-                        public void onError(String errorMessage) {
-                            Log.e(TAG, "Failed to set system mode: " + errorMessage);
-                            callback.onError("Failed at System Mode: " + errorMessage);
-                        }
-                    });
-                } else {
-                    Log.d(TAG, "System already in mode 2. Proceeding to set WiFi credentials...");
-                    setWiFiCredentials(callback, ssid, password);
-                }
-            }
+                    @Override
+                    public void onError(String errorMessage) {
+                        Log.e(TAG, "Failed to get system mode: " + errorMessage);
+                        callback.onError("Failed to get System Mode: " + errorMessage);
+                    }
+                });
 
-            @Override
-            public void onError(String errorMessage) {
-                Log.e(TAG, "Failed to get system mode: " + errorMessage);
-                callback.onError("Failed to get System Mode: " + errorMessage);
-            }
-        });
+                break;
+
+            case 0:
+                // 🚫 Prevent onboarding if already in progress
+                callback.onError("Provision is already in progress. Please wait.");
+                Log.d(TAG, "Provision on second device triggered");
+                break;
+
+            default:
+                // Optionally handle unexpected states
+                Log.w(TAG, "Unknown Provision state: " + state);
+
+        }
 
     }
-
+    /// wifi provision end here//
     private void setWiFiCredentials(RingerCallbacks.ProvisionCallback callback, String ssid, String password) {
         RemoteRinger_setWifiSsid(ssid, new RingerCallbacks.WiFiSSIDCallback() {
             @Override
@@ -2168,7 +2410,7 @@ public class DeviceSettingsManager {
                             Log.d(TAG, "WiFi Password set successfully: " + message);
 
                             new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                                RemoteRinger_wifiActivation(1, new RingerCallbacks.WifiActivationCallback() {
+                                RemoteRinger_wifiActivation(1,0, new RingerCallbacks.WifiActivationCallback() {
                                     @Override
                                     public void onSuccess(String message) {
                                         Log.d(TAG, "WiFi Activated: " + message);
@@ -2201,10 +2443,424 @@ public class DeviceSettingsManager {
         });
     }
 
+    /**
+     * Performs RemoteRinger_reProvision.
+     *
+     * @param ssid     The door lock ID to set
+     * @param password The encryption key to set
+     * @param callback The callback to handle the operation results
+     */
+
+    public void RemoteRinger_ReProvision(String ssid, String password, RingerCallbacks.ProvisionCallback callback) {
+
+        IsTriggerd=true;
+        // over wifi
+        // IsWifiOnBoardingState=true;
+        // over ble state
+        int state = getProvisionState;
+
+        Log.d(TAG,"Provision State is :::::::::::::::::::::::::"+state);
+
+        if (state == 1){
+            isTriggerd=0;
+            // isTriggerdWifiStatus=0;
+        }
+        else {
+            isTriggerd=1;
+            // isTriggerdWifiStatus=1;
+        }
+        Log.d("TAG", "RemoteRinger_Provision : " + state);
+
+        switch (isTriggerd) {
+            case 1:
+                bleResponseHandler.setProvisionCallback(callback);
+                if (ssid == null || ssid.isEmpty()) {
+                    callback.onError("Error: SSID cannot be empty");
+                    return;
+                }
+                if (ssid.getBytes(StandardCharsets.UTF_8).length < 2) {
+                    callback.onError("Error: SSID must be 2 bytes or less"); // ❌ Message is incorrect
+                    return;
+                }
+
+                // Check if SSID exceeds 32 bytes when encoded
+                if (ssid.getBytes(StandardCharsets.UTF_8).length > 32) {
+                    callback.onError("Error: SSID must be 32 bytes or less");
+                    return;
+                }
+                if (password == null || password.isEmpty()) {
+                    callback.onError("Password cannot be empty");
+                    return;
+                }
+
+                if (password.length() < 8) {
+                    callback.onError("Password must be at least 8 characters");
+                    return;
+                }
+
+                if (password.length() > 32) {
+                    callback.onError("Password must not exceed 32 characters");
+                    return;
+                }
+
+                RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
+                    @Override
+                    public void onSuccess(String systemMode) {
+                        Log.d(TAG, "Fetched System Boot Mode: " + systemMode);
+                        reProvisionMode = Integer.valueOf(systemMode);
+                        if (reProvisionMode > 3) {
+                            // Step 2: Now decide based on value of systemMode
+                            if (!"2".equals(systemMode)) {
+                                // Not in mode 2, so set it first
+                                RemoteRinger_setSystemMode(2, new RingerCallbacks.SystemModeCallback() {
+                                    @Override
+                                    public void onSuccess(String message) {
+                                        Log.d(TAG, "System mode set to 2: " + message);
+                                        setWiFiCredentials_ReProvision(callback, ssid, password);
+                                    }
+
+                                    @Override
+                                    public void onError(String errorMessage) {
+                                        Log.e(TAG, "Failed to set system mode: " + errorMessage);
+                                        //callback.onError("Failed at System Mode: " + errorMessage);
+                                    }
+                                });
+                            } else {
+                                Log.d(TAG, "System already in mode 2. Proceeding to set WiFi credentials...");
+                                setWiFiCredentials_ReProvision(callback, ssid, password);
+                            }
+                        }else{
+                            callback.onError("ReProvision is not allowed");
+                            BleResponseHandler.cancelTimeout();
+                        }
+                    }
+
+                    @Override
+                    public void onError(String errorMessage) {
+                        Log.e(TAG, "Failed to get system mode: " + errorMessage);
+                        callback.onError("Failed to get System Mode: " + errorMessage);
+                    }
+                });
+
+                break;
+
+            case 0:
+                // 🚫 Prevent onboarding if already in progress
+                callback.onError("Provision is already in progress. Please wait.");
+                Log.d(TAG, "Provision on second device triggered");
+                break;
+
+            default:
+                // Optionally handle unexpected states
+                Log.w(TAG, "Unknown Provision state: " + state);
+
+        }
+
+    }
+    /// wifi provision end here//
+    private void setWiFiCredentials_ReProvision(RingerCallbacks.ProvisionCallback callback, String ssid, String password) {
+        RemoteRinger_setWifiSsid(ssid, new RingerCallbacks.WiFiSSIDCallback() {
+            @Override
+            public void onSuccess(String message) {
+                Log.d(TAG, "SSID set successfully: " + message);
+                bleResponseHandler.startProvisionTimeout();
+
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    RemoteRinger_setWifiPass(password, new RingerCallbacks.WifiPasswordcallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            Log.d(TAG, "WiFi Password set successfully: " + message);
+
+                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                RemoteRinger_wifiActivation(1, 1,new RingerCallbacks.WifiActivationCallback() {
+                                    @Override
+                                    public void onSuccess(String message) {
+                                        Log.d(TAG, "WiFi Activated: " + message);
+                                        callback.onSuccess("Wifi Credentials Set Successfully!");
 
 
-    ///wifi provision end here//
+                                        }
 
+
+
+                                        @Override
+                                    public void onError(String errorMessage) {
+                                        Log.e(TAG, "Failed to activate WiFi: " + errorMessage);
+                                        callback.onError("WiFi Activation Failed: " + errorMessage);
+                                    }
+                                });
+                            }, 1000);
+                        }
+
+                        @Override
+                        public void onError(String errorMessage) {
+                            Log.e(TAG, "Failed to set WiFi password: " + errorMessage);
+                            callback.onError("Failed to set WiFi Password: " + errorMessage);
+                        }
+                    });
+                }, 1000);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to set SSID: " + errorMessage);
+                callback.onError("Failed to set SSID: " + errorMessage);
+            }
+        });
+    }
+
+
+
+   /* // working before
+    public void RemoteRinger_ReProvision(String ssid, String password, RingerCallbacks.ReProvisionCallBack callback) {
+
+        bleResponseHandler.setReProvisionCallback(callback);
+
+        RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
+            @Override
+            public void onSuccess(String systemMode) {
+                Log.d(TAG, "Fetched System Boot Mode: " + systemMode);
+                reProvisionMode = Integer.valueOf(systemMode);
+
+
+                // Step 2: Now decide based on value of systemMode
+                if (!"2".equals(systemMode)) {
+                    // Not in mode 2, so set it first
+                    RemoteRinger_setSystemMode(2, new RingerCallbacks.SystemModeCallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            Log.d(TAG, "System mode set to 2: " + message);
+                            setWiFiCredentials_ReProvision(callback, ssid, password);
+                        }
+
+                        @Override
+                        public void onError(String errorMessage) {
+                            Log.e(TAG, "Failed to set system mode: " + errorMessage);
+                            callback.onError("Failed at System Mode: " + errorMessage);
+                        }
+                    });
+                } else {
+                    Log.d(TAG, "System already in mode 2. Proceeding to set WiFi credentials...");
+                    setWiFiCredentials_ReProvision(callback, ssid, password);
+                }
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to get system mode: " + errorMessage);
+                callback.onError("Failed to get System Mode: " + errorMessage);
+            }
+        });
+
+    }
+    // before reprovisioning  is working
+    private void setWiFiCredentials_ReProvision(RingerCallbacks.ReProvisionCallBack callback, String ssid, String password) {
+        RemoteRinger_setWifiSsid(ssid, new RingerCallbacks.WiFiSSIDCallback() {
+            @Override
+            public void onSuccess(String message) {
+                Log.d(TAG, "SSID set successfully: " + message);
+                bleResponseHandler.reProvisionTimeout();
+
+
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    RemoteRinger_setWifiPass(password, new RingerCallbacks.WifiPasswordcallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            Log.d(TAG, "WiFi Password set successfully: " + message);
+
+                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                RemoteRinger_wifiActivation(1, new RingerCallbacks.WifiActivationCallback() {
+                                    @Override
+                                    public void onSuccess(String message) {
+                                        Log.d(TAG, "WiFi Activated: " + message);
+                                        callback.onSuccess("Wifi Credentials Set Successfully!");
+                                        if(reProvisionMode>2) {
+                                            RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
+                                                @Override
+                                                public void onSuccess(String message) {
+
+                                                }
+
+                                                @Override
+                                                public void onError(String errorMessage) {
+
+                                                }
+                                            });
+                                        }else{
+                                            Log.e(TAG, "Mode is " + reProvisionMode);
+                                        }
+                                    }
+
+                                    @Override
+                                    public void onError(String errorMessage) {
+                                        Log.e(TAG, "Failed to activate WiFi: " + errorMessage);
+                                        callback.onError("WiFi Activation Failed: " + errorMessage);
+                                    }
+                                });
+                            }, 3000);
+                        }
+
+                        @Override
+                        public void onError(String errorMessage) {
+                            Log.e(TAG, "Failed to set WiFi password: " + errorMessage);
+                            callback.onError("Failed to set WiFi Password: " + errorMessage);
+                        }
+                    });
+                }, 1000);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to set SSID: " + errorMessage);
+                callback.onError("Failed to set SSID: " + errorMessage);
+            }
+        });
+    }
+*/
+
+
+   /* // before reprovisioning  is working
+    private void setWiFiCredentials_ReProvision(RingerCallbacks.ReProvisionCallBack callback, String ssid, String password) {
+        RemoteRinger_setWifiSsid(ssid, new RingerCallbacks.WiFiSSIDCallback() {
+            @Override
+            public void onSuccess(String message) {
+                Log.d(TAG, "SSID set successfully: " + message);
+
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    RemoteRinger_setWifiPass(password, new RingerCallbacks.WifiPasswordcallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            Log.d(TAG, "WiFi Password set successfully: " + message);
+
+                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                RemoteRinger_wifiActivation(1, new RingerCallbacks.WifiActivationCallback() {
+                                    @Override
+                                    public void onSuccess(String message) {
+                                        // Log.d(TAG, "WiFi Activated: " + message);
+                                        //callback.onSuccess("Wifi Credentials Set Successfully!");
+                                        if (reProvisionMode > 2) {
+                                            RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
+                                                @Override
+                                                public void onSuccess(String message) {
+                                                    callback.onSuccess("ReProvision Done");
+                                                }
+
+                                                @Override
+                                                public void onError(String errorMessage) {
+
+                                                }
+                                            });
+                                        } else {
+                                            callback.onSuccess("ReProvision is not allowed");
+                                        }
+                                    }
+
+                                    @Override
+                                    public void onError(String errorMessage) {
+                                        //Log.e(TAG, "Failed to activate WiFi: " + errorMessage);
+                                        // callback.onError("WiFi Activation Failed: " + errorMessage);
+                                        if (reProvisionMode > 2) {
+                                            RemoteRinger_setSystemMode(reProvisionMode, new RingerCallbacks.SystemModeCallback() {
+                                                @Override
+                                                public void onSuccess(String message) {
+                                                    callback.onSuccess("ReProvision Done");
+                                                }
+
+                                                @Override
+                                                public void onError(String errorMessage) {
+
+                                                }
+                                            });
+                                        } else {
+                                            callback.onSuccess("Retain State is not allowed");
+                                        }
+                                    }
+                                });
+                            }, 1000);
+                        }
+
+                        @Override
+                        public void onError(String errorMessage) {
+                            // Log.e(TAG, "Failed to set WiFi password: " + errorMessage);
+                            // callback.onError("Failed to set WiFi Password: " + errorMessage);
+                        }
+                    });
+                }, 1000);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to set SSID: " + errorMessage);
+                callback.onError("Failed to set SSID: " + errorMessage);
+            }
+        });
+    }
+*/
+    // for working with open password provision
+
+    /*private void setWiFiCredentials(RingerCallbacks.ProvisionCallback callback, String ssid, String password) {
+
+        RemoteRinger_setWifiSsid(ssid, new RingerCallbacks.WiFiSSIDCallback() {
+            @Override
+            public void onSuccess(String message) {
+                Log.d(TAG, "SSID set successfully: " + message);
+                bleResponseHandler.startProvisionTimeout();
+
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    // Check if password is null or empty
+                    if (password == null || password.isEmpty()) {
+                        Log.d(TAG, "Password is empty. Skipping password step and activating WiFi.");
+                        activateWiFi(callback);
+                    } else if (password.length() >= 8) {
+                        // Valid password
+                        RemoteRinger_setWifiPass(password, new RingerCallbacks.WifiPasswordcallback() {
+                            @Override
+                            public void onSuccess(String message) {
+                                Log.d(TAG, "WiFi Password set successfully: " + message);
+
+                                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                    activateWiFi(callback);
+                                }, 1000);
+                            }
+
+                            @Override
+                            public void onError(String errorMessage) {
+                                Log.e(TAG, "Failed to set WiFi password: " + errorMessage);
+                                callback.onError("Failed to set WiFi Password: " + errorMessage);
+                            }
+                        });
+                    } else {
+                        // Password is non-empty but less than 8 characters
+                        Log.e(TAG, "Password must be at least 8 characters.");
+                        callback.onError("Password must be at least 8 characters.");
+                    }
+                }, 1000);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to set SSID: " + errorMessage);
+                callback.onError("Failed to set SSID: " + errorMessage);
+            }
+        });
+    }
+
+    // Helper method to activate WiFi
+    private void activateWiFi(RingerCallbacks.ProvisionCallback callback) {
+        RemoteRinger_wifiActivation(1, new RingerCallbacks.WifiActivationCallback() {
+            @Override
+            public void onSuccess(String message) {
+                Log.d(TAG, "WiFi Activated: " + message);
+                callback.onSuccess("WiFi Credentials Set Successfully!");
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Failed to activate WiFi: " + errorMessage);
+                callback.onError("WiFi Activation Failed: " + errorMessage);
+            }
+        });
+    }*/
 
     /**
      * Performs onboarding of the remote ringer device with door lock settings.
@@ -2214,14 +2870,41 @@ public class DeviceSettingsManager {
      * @param bleMacId      The BLE MAC address to set
      * @param callback      The callback to handle the operation results
      */
+  // old working
 
-
-
-
-
-    public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String bleMacId, int onBoardingType, RingerCallbacks.OnboardingCallback callback) {
+    /*public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String bleMacId, int onBoardingType, RingerCallbacks.OnboardingCallback callback) {
         Constant_Variable.getOnBoardingType = onBoardingType;
         Log.d(TAG, "RemoteRinger_Onboarding called : " + onBoardingType);
+        IsTriggerd = true;
+
+
+        // === First: Validate Inputs ===
+        if (doorLockId == null || doorLockId.isEmpty()) {
+            callback.onError("Error: doorLockId cannot be empty");
+            return;
+        }
+        if (doorLockId.getBytes(StandardCharsets.UTF_8).length > 16) {  // Corrected: 16 bytes check
+            callback.onError("Error: doorLockId must be 16 bytes or less");
+            return;
+        }
+
+        if (encryptionKey == null || encryptionKey.isEmpty()) {
+            callback.onError("Error: encryptionKey cannot be empty");
+            return;
+        }
+        if (encryptionKey.getBytes(StandardCharsets.UTF_8).length > 32) {  // Corrected: 16 bytes check
+            callback.onError("Error: encryptionKey must be 32 bytes or less");
+            return;
+        }
+
+        if (bleMacId == null || bleMacId.isEmpty()) {
+            callback.onError("Error: BLE MAC address cannot be empty");
+            return;
+        }
+        if (encryptionKey.getBytes(StandardCharsets.UTF_8).length > 32) {  // Corrected: 16 bytes check
+            callback.onError("Error: BLE MAC address must be 32 bytes or less");
+            return;
+        }
         // Step 1: First fetch current system mode
         RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
             @Override
@@ -2234,7 +2917,7 @@ public class DeviceSettingsManager {
                         @Override
                         public void onSuccess(String message) {
                             Log.d(TAG, "System mode set to 3: " + message);
-                            performOnboarding(doorLockId, encryptionKey, bleMacId, onBoardingType,callback);
+                            performOnboarding(doorLockId, encryptionKey, bleMacId, onBoardingType, callback);
                         }
 
                         @Override
@@ -2245,7 +2928,7 @@ public class DeviceSettingsManager {
                     });
                 } else {
                     Log.d(TAG, "System already in mode 3. Proceeding to onboarding...");
-                    performOnboarding(doorLockId, encryptionKey, bleMacId, onBoardingType,callback);
+                    performOnboarding(doorLockId, encryptionKey, bleMacId, onBoardingType, callback);
                 }
             }
 
@@ -2256,10 +2939,162 @@ public class DeviceSettingsManager {
             }
         });
     }
+*/
 
-    private void performOnboarding(String doorLockId, String encryptionKey, String bleMacId, int onBoardingType,RingerCallbacks.OnboardingCallback callback) {
+    public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String bleMacId, int onBoardingType, RingerCallbacks.OnboardingCallback callback) {
+        Constant_Variable.getOnBoardingType = onBoardingType;
+        Log.d(TAG, "RemoteRinger_Onboarding called : " + onBoardingType);
+//     over ble
+        IsTriggerd=true;
+        // over wifi
+       // IsWifiOnBoardingState=true;
+        // over ble state
+        int state = getOnboardingState;
+        int wifiState=getWifiOnboardingState;
+
+        if(onBoardingType==1) {
+
+            if (state == 1) {
+                isTriggerd = 0;
+                // isTriggerdWifiStatus=0;
+            } else {
+                isTriggerd = 1;
+                // isTriggerdWifiStatus=1;
+            }
+            Log.d("TAG", "RemoteRinger_Onboarding state : " + state);
+        }else if(onBoardingType==2){
+            if (wifiState == 1) {
+                isTriggerd = 0;
+                // isTriggerdWifiStatus=0;
+            } else {
+                isTriggerd = 1;
+                // isTriggerdWifiStatus=1;
+            }
+
+        }else if(onBoardingType==3){
+            if (wifiState == 1 && state==1) {
+                isTriggerd = 0;
+                // isTriggerdWifiStatus=0;
+            } else {
+                isTriggerd = 1;
+                // isTriggerdWifiStatus=1;
+            }
+        }
+        else if(onBoardingType==4){
+            if (wifiState == 1 || state==1) {
+                isTriggerd = 0;
+                // isTriggerdWifiStatus=0;
+            } else {
+                isTriggerd = 1;
+                // isTriggerdWifiStatus=1;
+            }
+        }
+
+
+
+        switch (isTriggerd) {
+            case 1:
+                // ✅ 1. Validate doorLockId
+                if (doorLockId == null || doorLockId.isEmpty()) {
+                    callback.onError("Error: DoorLockId cannot be empty");
+                    return;
+                }
+
+                if (doorLockId.length() < 3) {
+                    callback.onError("Error: DoorLockId must be at least 3 characters long");
+                    return;
+                }
+
+                // Check if UTF-8 encoded byte length exceeds 16
+                if (doorLockId.getBytes(StandardCharsets.UTF_8).length > 16) {
+                    callback.onError("Error: DoorLockId must be 16 bytes or less");
+                    return;
+                }
+
+                // ✅ 2. Validate encryptionKey
+                if (encryptionKey == null || encryptionKey.isEmpty()) {
+                    callback.onError("Error: encryptionKey cannot be empty");
+                    return;
+                }
+                if(encryptionKey.length()<5){
+                    callback.onError("Error: Encryption key must be at least 5 characters");
+                }
+                if (encryptionKey.getBytes(StandardCharsets.UTF_8).length > 32) {
+                    callback.onError("Error: encryptionKey must be 32 bytes or less");
+                    return;
+                }
+
+                // ✅ 3. Validate bleMacId
+                if (bleMacId == null || bleMacId.isEmpty()) {
+                    callback.onError("Error: BLE MAC address cannot be empty");
+                    return;
+                }
+                /*if (bleMacId.getBytes(StandardCharsets.UTF_8).length > 17) { // ✅ Fixed this check
+                    callback.onError("Error: BLE MAC address must be 17 bytes or less");
+                    return;
+                }*/
+                if ( bleMacId.getBytes(StandardCharsets.UTF_8).length != 12) {
+                    callback.onError("Error: BLE MAC address must be exactly 12 characters");
+                    return;
+                }
+
+                // ✅ 4. Get system mode
+                RemoteRinger_getSystemMode(new RingerCallbacks.SystemModeCallback() {
+                    @Override
+                    public void onSuccess(String systemMode) {
+                        Log.d(TAG, "Fetched System Boot Mode: " + systemMode);
+
+                        if (!"3".equals(systemMode)) {
+                            // ❗ Not in onboarding mode, set system mode to 3
+                            RemoteRinger_setSystemMode(3, new RingerCallbacks.SystemModeCallback() {
+                                @Override
+                                public void onSuccess(String message) {
+                                    Log.d(TAG, "System mode set to 3: " + message);
+                                    performOnboarding(doorLockId, encryptionKey, bleMacId, onBoardingType, callback);
+                                }
+
+                                @Override
+                                public void onError(String errorMessage) {
+                                    Log.e(TAG, "Failed to set system mode to 3: " + errorMessage);
+                                    callback.onError("Failed at setting System Mode: " + errorMessage);
+                                }
+                            });
+                        } else {
+                            Log.d(TAG, "System already in mode 3. Proceeding to onboarding...");
+                            performOnboarding(doorLockId, encryptionKey, bleMacId, onBoardingType, callback);
+                        }
+                    }
+
+                    @Override
+                    public void onError(String errorMessage) {
+                        Log.e(TAG, "Failed to get system mode: " + errorMessage);
+                        callback.onError("Failed to get System Mode: " + errorMessage);
+                    }
+                });
+                break;
+
+            case 0:
+                // 🚫 Prevent onboarding if already in progress
+                callback.onError("Onboarding is already in progress. Please wait.");
+                Log.d(TAG, "Onboarding on second device triggered");
+                break;
+
+            default:
+                // Optionally handle unexpected states
+                Log.w(TAG, "Unknown onboarding state: " + state);
+                callback.onError("Unexpected onboarding state.");
+        }
+
+
+    }
+
+    //onboarding ends here//
+
+    private void performOnboarding(String doorLockId, String encryptionKey, String bleMacId, int onBoardingType, RingerCallbacks.OnboardingCallback callback) {
         bleResponseHandler.startOnboardingTimeout();
         bleResponseHandler.setOnboardingCallback(callback);
+        Log.d(TAG, "Before DoorLockUnitType " + onBoardingType);
+
 
         RemoteRinger_SetDoorLockId(doorLockId, new RingerCallbacks.DoorLockIDCallback() {
             @Override
@@ -2278,8 +3113,8 @@ public class DeviceSettingsManager {
                                     public void onSuccess(String message) {
                                         Log.d(TAG, "BLE MAC ID Set: " + message);
                                         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-
-                                            RemoteRinger_setOnBoardingActivation(1,onBoardingType, new RingerCallbacks.OnBoardingActivationCallback() {
+                                            Log.d(TAG, "After DoorLockUnitType " + onBoardingType);
+                                            RemoteRinger_setOnBoardingActivation(1, onBoardingType, new RingerCallbacks.OnBoardingActivationCallback() {
                                                 @Override
                                                 public void onSuccess(String message) {
                                                     Log.d(TAG, "Onboarding Activation Started: " + message);
@@ -2321,11 +3156,6 @@ public class DeviceSettingsManager {
         });
     }
 
-
-
-    //onboarding ends here//
-
-
     /**
      * Gets comprehensive device information from the remote ringer device.
      *
@@ -2335,6 +3165,10 @@ public class DeviceSettingsManager {
 
     //get device info starts here//
     public void RemoteRinger_getDeviceInfo(RingerCallbacks.DevicesInfoCallback callback) {
+        if(OtaChecksStatus){
+            callback.onError("OTA update is in progress...");
+            return;
+        }
         getSerialNumber(callback);
     }
 
@@ -2374,7 +3208,7 @@ public class DeviceSettingsManager {
         RemoteRinger_GetHardwareVersion(new RingerCallbacks.HardwareVersionCallback() {
             @Override
             public void onSuccess(String message) {
-                Log.d(TAG, "HardwareVersion: " +  message);
+                Log.d(TAG, "HardwareVersion: " + message);
                 getHardwareVersion = message;
                 delayThen(() -> getBootMode(callback), 1000);
             }
@@ -2403,6 +3237,9 @@ public class DeviceSettingsManager {
             }
         });
     }
+
+
+    //get device info ends here
 
     private void getDeviceModel(RingerCallbacks.DevicesInfoCallback callback) {
         RemoteRinger_GetDeviceModelID(new RingerCallbacks.DeviceModelCallback() {
@@ -2435,10 +3272,6 @@ public class DeviceSettingsManager {
         });
     }
 
-
-
-    //get device info ends here
-
     /**
      * **🔹  read the file as InputStream **
      */
@@ -2461,12 +3294,20 @@ public class DeviceSettingsManager {
      */
     public void setResponse(byte commandCode, byte[] responseData) {
         String responseString;
+        int volumeLevel;
         responseMap.put(commandCode, responseData);
         RingerCallbacks.BaseCallback callback = commandCallbackMap.remove(commandCode);
-        if (commandCode == 0x1C  ) { // Get current Audio Tone (should be integer)
+        if (commandCode == 0x1C) { // Get current Audio Tone (should be integer)
             responseString = String.valueOf(byteArrayToInt(responseData));
-        }
-        else if (commandCode == 0x0B) {
+            if (ringerDeviceCallback != null) {
+                runOnMainThread(() -> {
+                    Map<String, String> dataMap = new HashMap<>();
+                    dataMap.put("Current Tone", responseString);  // Replace "someKey" with an appropriate key
+                    ringerDeviceCallback.onDeviceDataReceived(dataMap);
+                });
+            }
+
+        } else if (commandCode == 0x0B) {
             int modelId = convertTwoBytesToInt(responseData); // or byteArrayToInt(responseData) based on your format
 
             Log.d(TAG, "Device ModelId : " + modelId);
@@ -2477,21 +3318,20 @@ public class DeviceSettingsManager {
             return;
         }
         else if (commandCode == 0x1E) {
-            int volumeLevel = convertOneByteToInt(responseData); // or byteArrayToInt(responseData) based on your format
-            int bootMode = convertOneByteToInt(responseData);
-            Log.d(TAG, "Volume Level : " + volumeLevel);
-
-            if (volumelevelCallback != null) {
-                runOnMainThread(() -> volumelevelCallback.onSuccess(volumeLevel));
+             //volumeLevel = convertOneByteToInt(responseData); // or byteArrayToInt(responseData) based on your format
+            responseString = String.valueOf(byteArrayToInt(responseData));
+            if (ringerDeviceCallback != null) {
+                runOnMainThread(() -> {
+                    Map<String, String> dataMap = new HashMap<>();
+                    //dataMap.put("Volume Level", responseString);  // Replace "someKey" with an appropriate key
+                    dataMap.put("Volume Level", responseString);  // Replace "someKey" with an appropriate key
+                    ringerDeviceCallback.onDeviceDataReceived(dataMap);
+                });
             }
+           // return;
 
-//            if (getBootModeCallback != null) {
-//                runOnMainThread(() -> getBootModeCallback.onSuccess(bootMode));
-//            }
-            return;
-        }
-        else if (commandCode == 0x07) {
-           // or byteArrayToInt(responseData) based on your format
+        } else if (commandCode == 0x07) {
+            // or byteArrayToInt(responseData) based on your format
             int bootMode = convertOneByteToInt(responseData);
             Log.d(TAG, "Boot Mode : " + bootMode);
 
@@ -2500,8 +3340,7 @@ public class DeviceSettingsManager {
             }
 
             return;
-        }
-        else if (commandCode == 0x03 ){
+        } else if (commandCode == 0x03) {
             if (isPrintableAscii(responseData)) {
                 responseString = new String(responseData, StandardCharsets.UTF_8);
             } else {
@@ -2509,14 +3348,14 @@ public class DeviceSettingsManager {
             }
             String versionFormat = convertToVersionFormat(responseString);
             if (callback != null) {
-                runOnMainThread(( )->callback.onSuccess(versionFormat));
+                runOnMainThread(() -> callback.onSuccess(versionFormat));
                 return;
             }
         }
 
         //firmware reverse string
         //convertFirmwareVersionFormat
-        else if (commandCode == 0x05){
+        else if (commandCode == 0x05) {
             if (isPrintableAscii(responseData)) {
                 responseString = new String(responseData, StandardCharsets.UTF_8);
             } else {
@@ -2524,12 +3363,14 @@ public class DeviceSettingsManager {
             }
             String versionFormat = convertFirmwareVersionFormat(responseString);
             if (callback != null) {
-                runOnMainThread(( )->callback.onSuccess(versionFormat));
+                runOnMainThread(() -> callback.onSuccess(versionFormat));
                 return;
             }
         }
-
-
+        // edit code by susheel 10-06-2025
+        else if(responseData.length == 1){
+            responseString = String.valueOf(responseData[0] & 0xFF); // Convert byte to unsigned int
+        }
 
         else if (isPrintableAscii(responseData)) {
             responseString = new String(responseData, StandardCharsets.UTF_8);
@@ -2541,6 +3382,7 @@ public class DeviceSettingsManager {
             String errorMessage = errorMap.get(responseString);
             Log.e(TAG, "Error received: " + responseString + " - " + errorMessage);
 
+            Log.e(TAG, "callback: " + callback);
             if (callback != null) {
                 runOnMainThread(() -> callback.onError(errorMessage));
             }
@@ -2551,7 +3393,8 @@ public class DeviceSettingsManager {
         // If no error, call onSuccess with response
         if (callback != null) {
             String finalResponseString = responseString;
-            runOnMainThread(( )->callback.onSuccess(finalResponseString));
+            Log.e(TAG,"Final Response:::::"+finalResponseString);
+            runOnMainThread(() -> callback.onSuccess(finalResponseString));
         }
         switch (commandCode) {
             case 0x01:  // Command for get Serial Number
@@ -2563,14 +3406,11 @@ public class DeviceSettingsManager {
             case 0x05:  // Command for get Firmware version
                 convertFirmwareVersionFormat(responseString);
                 break;
-
             case 0x02:  // Command for set Serial Number
                 Constant_Variable.getResponseOk = responseString;
                 break;
             case 0x04:  // Command for set hardware version
                 Constant_Variable.getResponseOk = responseString;
-
-
                 break;
             case 0x23:  // Command for set WiFiSSID
                 Constant_Variable.getResponseOk = responseString;
@@ -2586,10 +3426,38 @@ public class DeviceSettingsManager {
                 break;
             case 0x0E:  // Get System Mode
                 Constant_Variable.getSystemBootMode = responseString;
+
+                String message="";
+                switch (responseString) {
+                    case "1":
+                        message = "Factory Out";
+                        break;
+                    case "2":
+                        message = "Provisioning";
+                        break;
+                    case "3":
+                        message = "Onboarding";
+                        break;
+                    case "4":
+                        message = "Operational";
+                        break;
+                    default:
+                        message = "Factory In";
+                        break;
+                }
+
+                String finalMessage = message;
+                if (ringerDeviceCallback != null) {
+                    runOnMainThread(() -> {
+                        Map<String, String> dataMap = new HashMap<>();
+                        dataMap.put("Current State", finalMessage);  // Replace "someKey" with an appropriate key
+                        ringerDeviceCallback.onDeviceDataReceived(dataMap);
+                    });
+                }
                 break;
+
             case 0x07:  // GET_APPLICATION_BOOT_MODE
                 Constant_Variable.getApplicationBootMode = Integer.parseInt(responseString);
-
                 break;
             case 0x0B:  // Get Device Model ID
                 Constant_Variable.getDeviceModelID = String.valueOf(convertTwoBytesToInt(responseData));
@@ -2598,9 +3466,6 @@ public class DeviceSettingsManager {
                 break;
             case 0x0F:  // Get Door Lock ID
                 Constant_Variable.getDoorLockID = responseString;
-                break;
-            case 0x1E:  // Get Volume Level
-                Constant_Variable.getVolumeLevel = responseString;
                 break;
             case 0x13:  // Mobile Auth
                 Constant_Variable.getResponseOk = responseString;
@@ -2621,14 +3486,6 @@ public class DeviceSettingsManager {
                 break;
             case 0x2D:  // Preview Audio Tone
                 Constant_Variable.getResponseOk = responseString;
-                break;
-            case 0x1C:  // Get current Audio Tone
-//                handleResponseMelodyList(responseData);
-//                String melodyTone = handleResponseMelodyList(responseData);
-
-//                if (callback instanceof RingerCallbacks.PlayMelodyCallback) {
-//                    runOnMainThread(() -> ((RingerCallbacks.PlayMelodyCallback) callback).onSuccess(getCurrentToneID));
-//                }
                 break;
             case 0x0D: // Set System Mode
                 setResponseOk = responseString;
@@ -2764,7 +3621,12 @@ public class DeviceSettingsManager {
      * **🔹  start the RemoteRinger_StartOtaUpdate   **
      */
 
-    public void RemoteRinger_StartOtaUpdate( Uri fileUri, RingerCallbacks.OtaProgressCallback callback) {
+    public void RemoteRinger_StartOtaUpdate(Uri fileUri, RingerCallbacks.OtaProgressCallback callback) {
+
+        if (fileUri == null || fileUri.toString().trim().isEmpty()) {
+            Toast.makeText(context, "Please select a firmware file", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         RemoteRinger_setApplicationBootMode(1, new RingerCallbacks.SetApplicationBootMode() {
             @Override
@@ -2799,13 +3661,11 @@ public class DeviceSettingsManager {
 
     }
 
-
-
     /**
      * **🔹  firmware data is divide  into the chunks 128 byte    **
      */
-
-    public void writeDataInChunks(byte[] data, RingerCallbacks.OtaProgressCallback callback) {
+//          working code old
+    /*public void writeDataInChunks(byte[] data, RingerCallbacks.OtaProgressCallback callback) {
         Log.d(TAG, "writeDataInChunks() called");
 
         BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
@@ -2831,6 +3691,8 @@ public class DeviceSettingsManager {
 
         int maxChunkSize = Math.min(currentMtu, 512); // ✅ Use dynamic MTU-based chunk size
         Log.d(TAG, "Current MTU: " + currentMtu + ", Using Chunk Size: " + maxChunkSize);
+        Log.d(TAG, "BLEManager MTU: " + BluetoothManager.currentMtu + ", Updated chunk size: " + maxChunkSize);
+
 
         int totalChunks = (int) Math.ceil((double) data.length / maxChunkSize);
         AtomicInteger currentChunk = new AtomicInteger(0);
@@ -2861,9 +3723,14 @@ public class DeviceSettingsManager {
 
                 Log.d(TAG, "Writing chunk " + (chunkIndex + 1) + " of " + totalChunks);
 
+
+
                 characteristic.setValue(chunk);
                 characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
 
+                if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    return;
+                }
                 boolean writeSuccess = bluetoothGatt.writeCharacteristic(characteristic);
                 if (!writeSuccess) {
                     Log.e(TAG, "BLE Write Failed for chunk " + (chunkIndex + 1));
@@ -2875,14 +3742,185 @@ public class DeviceSettingsManager {
                 if (callback != null) callback.onDownloadProgress(progress);
 
                 currentChunk.incrementAndGet();
-                int delayMs = (currentMtu >= 512) ? 10 : 40; // ✅ Adjust delay dynamically
+                // int delayMs = (currentMtu >= 512) ? 10 : 40; // ✅ Adjust delay dynamically
+                if (currentMtu >= 512) {
+                    delayMs = 10; // high MTU, send faster
+                } else if (currentMtu >= 256) {
+                    delayMs = 20;
+                } else if (currentMtu >= 128) {
+                    delayMs = 30;
+                } else {
+                    delayMs = baseDelay; // fallback to base delay
+                }
                 handler.postDelayed(this, delayMs);
             }
         };
 
-        writeNextChunk.run();
+        if(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID_Ota_512_data)).equals(characteristic.getUuid())){
+            Log.d(TAG, "CHARACTERISTIC_UUID_Ota_512_data ");
+            byte[] response = characteristic.getValue();
+            int command = response[0] & 0xFF;  // Convert to unsigned int
+            Log.d(TAG, "CHARACTERISTIC_UUID_Ota_512_data"+command);
+            writeNextChunk.run();
+        }
+
+
+
+    }*/
+
+    // Wifi Rss CallBack 16-06-2025 susheel
+    public void RemoteRinger_WifiRssValue(RingerCallbacks.WifiRssiCallBack callBack){
+        this.wifiRssCallBack = callBack;
+        bleResponseHandler.setWifiRssCallback(wifiRssCallBack);
+    }
+    //Ble Rss CallBack 16-06-2025 susheel
+    public void RemoteRinger_BleRssValue(RingerCallbacks.DluBleRssiCallBack callBack){
+        this.bleRssCallBack = callBack;
+        bleResponseHandler.setBleRssCallback(bleRssCallBack);
+    }
+    //Wifi Router Status CallBack 16-06-2025 susheel
+
+    public void RemoteRinger_WifiRouterStatus(RingerCallbacks.WifiStatusCallBack callBack){
+        this.wifiRouterStatusCallBack = callBack;
+        bleResponseHandler.setWifiRouterStatusCallback(wifiRouterStatusCallBack);
+    }
+    //Ble Router Status CallBack 16-06-2025 susheel
+
+    public void RemoteRinger_BleRouterStatus(RingerCallbacks.DluBleStatusCallBack callBack){
+        this.bleRouterStatusCallBack = callBack;
+        bleResponseHandler.setBleRouterStatusCallback(bleRouterStatusCallBack);
+    }
+    //Udp Status CallBack 16-06-2025 susheel
+
+    public void RemoteRinger_GetUdpStatus(RingerCallbacks.DluUdpStatusCallBack callBack){
+        this.dluUdpStatusCallBack = callBack;
+        bleResponseHandler.setUdpStatusCallback(dluUdpStatusCallBack);
     }
 
+    // Wifi Rss value 16-06-2025 susheel
+    public void WifiRssValueUpdate(int rss, RingerCallbacks.WifiRssiCallBack callBack){
+        wifiRssCallBack = callBack;
+        if (wifiRssCallBack != null)
+            wifiRssCallBack.onWifiRssiUpdated(rss);
+    }
+    // Ble Rss value 16-06-2025 susheel
+    public void BleRssValueUpdate(int rss, RingerCallbacks.DluBleRssiCallBack callBack){
+        bleRssCallBack = callBack;
+        if (bleRssCallBack != null)
+            bleRssCallBack.onDluBleRssiUpdated(rss);
+
+    }
+    // Wifi Router status value 16-06-2025 susheel
+    public void WifiStatusValueUpdate(String wifiSatus,int RssiValue, RingerCallbacks.WifiStatusCallBack callBack){
+        wifiRouterStatusCallBack = callBack;
+        if (wifiRouterStatusCallBack != null)
+            wifiRouterStatusCallBack.onWifiStatus(wifiSatus,RssiValue);
+    }
+
+    // Udp status value 16-06-2025 susheel
+    public void UdpStatusValueUpdate(String udpStatus,int UdpRssiValue,RingerCallbacks.DluUdpStatusCallBack callBack){
+        dluUdpStatusCallBack = callBack;
+        if (dluUdpStatusCallBack != null)
+            dluUdpStatusCallBack.onDluUdpStatus(udpStatus,UdpRssiValue);
+    }
+
+    // Ble Router status value 16-06-2025 susheel
+    public void BleStatusValueUpdate(String bleSatus,int bleRssiValue, RingerCallbacks.DluBleStatusCallBack callBack){
+        bleRouterStatusCallBack = callBack;
+        if (bleRouterStatusCallBack != null)
+            bleRouterStatusCallBack.onDLuBleStatus(bleSatus,bleRssiValue);
+    }
+
+
+    // new working 19-05-2025
+
+    public void writeDataInChunks(byte[] data, RingerCallbacks.OtaProgressCallback callback) {
+        Log.d(TAG, "writeDataInChunks() called");
+
+        BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
+        if (bluetoothGatt == null) {
+            Log.e(TAG, "No active Bluetooth connection.");
+            if (callback != null) callback.onError("No active Bluetooth connection.");
+            return;
+        }
+
+        BluetoothGattService service = bluetoothGatt.getService(UUID.fromString(String.valueOf(SERVICE_UUID_Ota)));
+        if (service == null) {
+            Log.e(TAG, "OTA Service not found.");
+            if (callback != null) callback.onError("Service not found.");
+            return;
+        }
+
+        BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID_Ota_512_data)));
+        if (characteristic == null) {
+            Log.e(TAG, "OTA Characteristic not found.");
+            if (callback != null) callback.onError("Characteristic not found.");
+            return;
+        }
+
+         packetSize = Math.min(currentMtu, 512);
+         chunkSize=packetSize-2;
+        totalChunks = (int) Math.ceil((double) data.length / chunkSize);
+        currentChunkIndex = 0;
+        firmwareData = data;
+        otaCallback = callback;
+        writeCharacteristic = characteristic;
+
+        Log.d(TAG, "Current MTU: " + packetSize + ", Using Chunk Size: " + chunkSize);
+        Log.d(TAG, "Beginning chunk write: totalChunks=" + totalChunks);
+
+        writeNextChunk();
+    }
+
+    // old code is working 19-05-2025
+
+    public void writeNextChunk() {
+        if (isOtaPaused) {
+            Log.d(TAG, "OTA paused. Stopping chunk write.");
+            pendingOtaChunk = this::writeNextChunk;
+            return;
+        }
+
+        if (currentChunkIndex >= totalChunks) {
+            Log.i(TAG, "✅ All chunks written successfully!");
+            if (otaCallback != null) otaCallback.onSuccess("OTA update completion");
+            return;
+        }
+
+        // old code is working 19-05-2025
+        packetNumber=currentChunkIndex;
+        int start = currentChunkIndex * chunkSize;
+        int end = Math.min(start + chunkSize, firmwareData.length);
+        byte[] chunk = Arrays.copyOfRange(firmwareData, start, end);
+        byte[] sendPacket = new byte[chunk.length + 2];
+
+        // Add packet number as 2 bytes (Big Endian: high byte first)
+        sendPacket[0] = (byte) ((packetNumber >> 8) & 0xFF); // High byte
+        sendPacket[1] = (byte) (packetNumber & 0xFF);        // Low byte
+
+        // Copy chunk after the packet number
+        System.arraycopy(chunk, 0, sendPacket, 2, chunk.length);
+
+        Log.d(TAG, "Writing chunk " + (currentChunkIndex + 1) + " of " + totalChunks);
+
+        writeCharacteristic.setValue(sendPacket);
+        writeCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+
+        boolean success = bluetoothManager.getBluetoothGatt().writeCharacteristic(writeCharacteristic);
+        if (!success) {
+            Log.e(TAG, "Failed to write chunk at offset " + currentOffset);
+            if (otaCallback != null) otaCallback.onError("Chunk write failed");
+        }
+        int progress = (int) (((double) (currentChunkIndex + 1) / totalChunks) * 100);
+        Log.d(TAG, "Callback onProgress: " + progress + "%");
+        if (otaCallback != null) otaCallback.onDownloadProgress(progress);
+        currentChunkIndex++;
+
+    }
 
     /**
      * **🔹  send OtaControl Command for 0ne byte request  **
@@ -2906,8 +3944,6 @@ public class DeviceSettingsManager {
             }
         }, "RemoteRinger_GetWiFiSSID");
     }
-
-
 
     public void sendOtaControlCommand(byte[] command) {
         BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
@@ -2946,65 +3982,66 @@ public class DeviceSettingsManager {
         }
 
     }
-        //added new just to precise code
-        private byte[] buildCommandFrame(byte commandCode, byte[] payload) {
-            byte requestId = RemoteRingerCommand.getNextRequestId(context);
-            Log.e(TAG, "Command RequestId: " + requestId);
-            return RemoteRingerCommand.createCommandFrame(frameType, commandCode, requestId, Host_ID, payload);
+
+    //added new just to precise code
+    private byte[] buildCommandFrame(byte commandCode, byte[] payload) {
+        byte requestId = RemoteRingerCommand.getNextRequestId(context);
+        Log.e(TAG, "Command RequestId: " + requestId);
+        return RemoteRingerCommand.createCommandFrame(frameType, commandCode, requestId, Host_ID, payload);
+    }
+
+    // old code send data ove ble and working
+    private void sendBleCommand(byte[] commandFrame, RingerCallbacks.BaseCallback callback, String commandName) {
+        BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
+        if (bluetoothGatt == null) {
+            callback.onError("No active Bluetooth connection.");
+            return;
         }
 
-        private void sendBleCommand(byte[] commandFrame, RingerCallbacks.BaseCallback callback, String commandName) {
-            BluetoothGatt bluetoothGatt = bluetoothManager.getBluetoothGatt();
-            if (bluetoothGatt == null) {
-                callback.onError("No active Bluetooth connection.");
-                return;
-            }
+        BluetoothGattService service = bluetoothGatt.getService(UUID.fromString(String.valueOf(SERVICE_UUID)));
+        if (service == null) {
+            new Handler(Looper.getMainLooper()).postDelayed(() -> sendBleCommand(commandFrame, callback, commandName), 3000);
+            return;
+        }
 
-            BluetoothGattService service = bluetoothGatt.getService(UUID.fromString(String.valueOf(SERVICE_UUID)));
-            if (service == null) {
-                new Handler(Looper.getMainLooper()).postDelayed(() -> sendBleCommand(commandFrame, callback, commandName), 3000);
-                return;
-            }
+        BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID)));
+        if (characteristic == null) {
+            callback.onError("Characteristic not found.");
+            return;
+        }
 
-            BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(String.valueOf(CHARACTERISTIC_UUID)));
-            if (characteristic == null) {
-                callback.onError("Characteristic not found.");
-                return;
-            }
+        characteristic.setValue(commandFrame);
+        characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
 
-            characteristic.setValue(commandFrame);
-            characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
 
-            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                return;
-            }
+        boolean writeSuccess = bluetoothGatt.writeCharacteristic(characteristic);
 
-            boolean writeSuccess = bluetoothGatt.writeCharacteristic(characteristic);
-            if (!writeSuccess) {
+        if (!writeSuccess) {
 //                callback.onError("Failed to write " + commandName + " command");
-                postToMainThread(() -> callback.onError("Failed to write " + commandName + " command"));
-            } else {
+            postToMainThread(() -> callback.onError("Failed to write " + commandName + " command"));
+        } else {
 //                callback.onSuccess(commandName + " Command Sent");
-                postToMainThread(() -> callback.onSuccess(commandName + " Command Sent"));
+            postToMainThread(() -> callback.onSuccess(commandName + " Command Sent"));
 
-            }
         }
+    }
 
+    //helper method fo rrun ui on thread
+    private void postToMainThread(Runnable runnable) {
+        new Handler(Looper.getMainLooper()).post(runnable);
+    }
 
-        //helper method fo rrun ui on thread
-        private void postToMainThread(Runnable runnable) {
+    //added here for run on ui thread
+    private void runOnMainThread(Runnable runnable) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            runnable.run();
+        } else {
             new Handler(Looper.getMainLooper()).post(runnable);
         }
-
-
-        //added here for run on ui thread
-        private void runOnMainThread(Runnable runnable) {
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-                runnable.run();
-            } else {
-                new Handler(Looper.getMainLooper()).post(runnable);
-            }
-        }
+    }
 
     /**
      * **🔹 send  abortOtaUpdate  **
@@ -3032,9 +4069,12 @@ public class DeviceSettingsManager {
             gatt.close();
         }
     }*/
-
     public void abortOtaUpdate() {
         Log.w(TAG, "OTA Update Aborted by User");
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+            Log.d("OTA", "WakeLock released on OTA abort.");
+        }
 
         isOtaPaused = true;
         pendingOtaChunk = null;
@@ -3057,27 +4097,19 @@ public class DeviceSettingsManager {
         // ⏳ Add delay before reconnect
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             reconnectToDevice();
-        }, 500); // Delay in milliseconds (e.g., 1500 = 1.5 seconds)
+        }, 30000); // Delay in milliseconds (e.g., 30000 = 30 seconds)
     }
-
 
     private void reconnectToDevice() {
         bluetoothManager.attemptAutoReconnect();
 
-    }
-    public static int convertOneByteToInt(byte[] data) {
-        if (data == null || data.length != 1) {
-            throw new IllegalArgumentException("Byte array must be exactly 1 byte.");
-        }
-
-        return data[0] & 0xFF;
     }
 
     public void RemoteRinger_playMelodyList(Context context, RingerCallbacks.ToneCallback callback) {
         List<Tone> tones = JsonReader.readJson(context);
 
         if (tones == null || tones.isEmpty()) {
-            Toast.makeText(context, "No data found!", Toast.LENGTH_SHORT).show();
+            callback.onError("No data found!");
             return;
         }
 
@@ -3126,6 +4158,5 @@ public class DeviceSettingsManager {
 
 
 }
-
 
 

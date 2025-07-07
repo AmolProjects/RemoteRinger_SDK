@@ -1,12 +1,21 @@
 package com.remoteringer.Constant;
 
 public class DeviceInfo {
+    private String SerialNumber;
+    private String HardwareVersion;
+    private String FirmwareVersion;
+    private int ApplicationBootMode;
+    private int DeviceModelId;
+
     public DeviceInfo(String mSerialNumber, String mHardwareVersion, String mFirmwareVersion, int mApplicationBootMode, int mDeviceModelId) {
         this.SerialNumber = mSerialNumber;
         this.HardwareVersion = mHardwareVersion;
         this.FirmwareVersion = mFirmwareVersion;
         this.ApplicationBootMode = mApplicationBootMode;
         this.DeviceModelId = mDeviceModelId;
+    }
+
+    public DeviceInfo() {
     }
 
     public String getSerialNumber() {
@@ -47,14 +56,5 @@ public class DeviceInfo {
 
     public void setDeviceModelId(int deviceModelId) {
         this.DeviceModelId = deviceModelId;
-    }
-
-    private String SerialNumber;
-    private String HardwareVersion;
-    private String FirmwareVersion;
-    private int ApplicationBootMode;
-    private int DeviceModelId;
-
-    public DeviceInfo() {
     }
 }

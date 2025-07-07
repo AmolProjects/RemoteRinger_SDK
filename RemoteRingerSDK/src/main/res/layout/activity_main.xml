@@ -3,6 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:layout_marginTop="20sp"
+    android:id="@+id/scrollView"
     android:layout_marginBottom="40sp"
     android:fillViewport="true">
 
@@ -14,31 +15,83 @@
         android:padding="16dp"
         android:paddingBottom="5dp">
 
-        <LinearLayout
-            android:id="@+id/liFirst"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
             <!-- Scan Button -->
             <Button
                 android:id="@+id/btnScan"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
                 android:text="@string/scan_devices" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:text="Device Name"
+            android:textColor="@color/black"
+            android:textStyle="bold"
+            android:textSize="15sp" />
+        <!-- List of Bluetooth Devices -->
+        <ListView
+            android:id="@+id/listViewDevices"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:layout_marginTop="20dp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:text="Default Secret Key"
+            android:layout_marginTop="5dp"
+            android:textColor="@color/black"
+            android:textStyle="bold"
+            android:textSize="15sp" />
+        <EditText
+            android:id="@+id/edtSecretConnectDeviceID"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="5dp"
+            android:layout_marginTop="10dp"
+            android:layout_weight="1"
+            android:hint="Secret Key"
+            android:text="0000000000000000000000000000000000000000000000000000000000000000"/>
 
             <!-- Connect Button -->
             <Button
                 android:id="@+id/btnConnect"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
                 android:text="@string/connect_to_selected_device" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="2dp">
+
+            <TextView
+                android:id="@+id/RemoteRingerConnectionStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginTop="10dp"
+                android:text="Device Connected:" />
+            <TextView
+                android:id="@+id/RemoteRingerConnectionStatusVal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:textColor="#E30425"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginTop="10dp"
+                android:text="---" />
         </LinearLayout>
 
         <Button
@@ -46,32 +99,18 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="5dp"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="15dp"
             android:layout_weight="1"
             android:text="Disconnect" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_horizontal"
-            android:text="Bluetooth Address"
-            android:textColor="@color/black"
-            android:textSize="15sp" />
-
-        <!-- List of Bluetooth Devices -->
-        <ListView
-            android:id="@+id/listViewDevices"
-            android:layout_width="match_parent"
-            android:layout_height="200dp"
-            android:layout_marginTop="20dp" />
 
         <!-- //Factory in -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="15dp"
             android:gravity="center_horizontal"
-            android:text="Factory In Mode"
+            android:text="Factory In Management"
             android:textColor="@color/black"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -162,7 +201,26 @@
             android:layout_marginTop="10dp"
             android:layout_weight="1"
             android:backgroundTint="#E91E63"
-            android:text="Set Device Model Id" />
+            android:text="Set Device ModeL Id" />
+
+        <EditText
+            android:id="@+id/edtSecretDeviceID"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="5dp"
+            android:layout_marginTop="10dp"
+            android:layout_weight="1"
+            android:hint="Set Secret Key"
+            android:text="123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDE01"/>
+        <Button
+            android:id="@+id/BtSecretDeviceID"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="5dp"
+            android:layout_marginTop="10dp"
+            android:layout_weight="1"
+            android:backgroundTint="#E91E63"
+            android:text="Set Mobile Secret Key" />
 
         <Button
             android:id="@+id/btnSetSystemMode1"
@@ -179,7 +237,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:gravity="center_horizontal"
-            android:text="Factory Out"
+            android:text="Factory Out Management"
             android:textColor="@color/black"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -228,22 +286,12 @@
             android:layout_width="match_parent"
             android:layout_height="1dp" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:gravity="center_horizontal"
-            android:text="Check Application State"
-            android:textColor="@color/black"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
         <Button
             android:id="@+id/btnGetSystemMode"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="5dp"
-            android:layout_marginTop="15dp"
+            android:layout_marginTop="20dp"
             android:layout_weight="1"
             android:backgroundTint="#FF9800"
             android:text="Get Application State" />
@@ -257,7 +305,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:gravity="center_horizontal"
-            android:text="Wifi Provisioning"
+            android:text="Provisioning Management"
             android:textColor="@color/black"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -272,6 +320,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_weight="2"
+                android:text="Acclivis_ServerRoom"
                 android:hint="Enter Ssid " />
 
             <Button
@@ -298,6 +347,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_weight="2"
+                android:text="Acclivis_4321"
                 android:hint="Enter Password " />
 
             <Button
@@ -312,15 +362,30 @@
                 android:visibility="gone" />
         </LinearLayout>
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
         <Button
             android:id="@+id/btngrpWifiProvision"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_margin="5dp"
             android:layout_marginTop="10dp"
             android:layout_weight="1"
             android:backgroundTint="#4CAF50"
             android:text="Wifi Provisioning" />
+        <Button
+            android:id="@+id/btnWifiAbort"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="5dp"
+            android:layout_marginTop="10dp"
+            android:layout_weight="1"
+            android:backgroundTint="#4CAF50"
+            android:text="Abort Provisioning" />
+    </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -363,6 +428,7 @@
                 android:layout_marginTop="10dp"
                 android:backgroundTint="#3F51B5"
                 android:layout_weight="1"
+                android:visibility="gone"
                 android:gravity="center_horizontal|center_vertical"
                 android:text="Skip Provisioning" />
             <Button
@@ -377,6 +443,78 @@
                 android:text="Re Provisioning" />
         </LinearLayout>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/deviceStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:layout_weight="1"
+                android:layout_marginTop="10dp"
+                android:text="Wifi Status :" />
+            <TextView
+                android:id="@+id/WifiRouter_deviceStatusVal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="1dp"
+                android:textColor="#E30425"
+                android:textSize="13sp"
+                android:layout_weight="14"
+                android:layout_marginTop="10dp"
+                android:text="IDLE" />
+
+            <TextView
+                android:id="@+id/wifiRss"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:layout_marginTop="10dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:layout_weight="1"
+                android:text="Rssi :" />
+            <TextView
+                android:id="@+id/wifiRssValue"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="1dp"
+                android:layout_marginTop="10dp"
+                android:textColor="#E30425"
+                android:textSize="14sp"
+                android:layout_weight="14"
+                android:text="---" />
+        </LinearLayout>
+       <!-- <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/wifiRss"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:layout_marginTop="10dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:text="Wifi Rssi :" />
+            <TextView
+                android:id="@+id/wifiRssValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:layout_marginTop="10dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:text="0" />
+        </LinearLayout>-->
+
 
 
         <TextView
@@ -384,7 +522,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:gravity="center_horizontal"
-            android:text="OnBoarding"
+            android:text="Device OnBoarding Management"
             android:textColor="@color/black"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -512,16 +650,147 @@
             android:layout_marginBottom="10dp"
             android:padding="5dp"
             android:layout_height="wrap_content"/>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
 
         <Button
             android:id="@+id/btngrpOnBoarding"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_margin="5dp"
+            android:layout_weight="1"
             android:layout_marginTop="10dp"
             android:backgroundTint="#4CAF50"
             android:gravity="center_horizontal|center_vertical"
             android:text="OnBoarding" />
+        <Button
+            android:id="@+id/btnOnBoardingAbort"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="5dp"
+            android:layout_marginTop="10dp"
+            android:layout_weight="1"
+            android:backgroundTint="#4CAF50"
+            android:gravity="center_horizontal|center_vertical"
+            android:text="Abort OnBoarding" />
+    </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/deviceBleStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:layout_weight="1"
+                android:layout_marginTop="10dp"
+                android:text="DLU BLE Status :" />
+            <TextView
+                android:id="@+id/deviceBleStatusVal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="1dp"
+                android:textColor="#E30425"
+                android:textSize="13sp"
+                android:layout_weight="12"
+                android:layout_marginTop="10dp"
+                android:text="IDLE" />
+            <TextView
+                android:id="@+id/BleRss"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginTop="10dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:text="Rssi :" />
+            <TextView
+                android:id="@+id/BleRssVal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="1dp"
+                android:layout_marginTop="10dp"
+                android:layout_weight="12"
+                android:textColor="#E30425"
+                android:textSize="14sp"
+                android:text="---" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
+
+            <TextView
+                android:id="@+id/udpStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:layout_weight="1"
+                android:layout_marginTop="10dp"
+                android:text="DLU UDP Status :" />
+            <TextView
+                android:id="@+id/udpsStatusVal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:textColor="#E30425"
+                android:textSize="13sp"
+                android:layout_weight="12"
+                android:layout_marginTop="10dp"
+                android:text="IDLE" />
+            <TextView
+                android:id="@+id/UdpRss"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginTop="10dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:text="Rssi :" />
+            <TextView
+                android:id="@+id/UdpRssVal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="1dp"
+                android:layout_marginTop="10dp"
+                android:layout_weight="12"
+                android:textColor="#E30425"
+                android:textSize="14sp"
+                android:text="---" />
+        </LinearLayout>
+        <!--<LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/BleRss"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:layout_marginTop="10dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:text="Ble Rssi :" />
+            <TextView
+                android:id="@+id/BleRssVal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="5dp"
+                android:layout_marginTop="10dp"
+                android:textColor="@color/black"
+                android:textSize="14sp"
+                android:text="0" />
+        </LinearLayout>-->
 
 
         <TextView
@@ -529,7 +798,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:gravity="center_horizontal"
-            android:text="Operational State"
+            android:text="Operational State Management"
             android:textColor="@color/black"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -548,7 +817,8 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
 
             <Button
                 android:id="@+id/btnGetSerialNumber"
@@ -557,7 +827,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Get Serial Number" />
+                android:text="Serial Number" />
 
             <Button
                 android:id="@+id/GETHardwareVersion"
@@ -566,7 +836,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Get Hardware Version" />
+                android:text="Hardware Version" />
 
         </LinearLayout>
 
@@ -582,7 +852,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Get Firmware Version" />
+                android:text="Firmware Version" />
 
             <Button
                 android:id="@+id/GET_APPLICATION_BOOT_MODE"
@@ -628,21 +898,21 @@
 
             <Button
                 android:id="@+id/GET_DEVICE_MODEL_ID"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Get Device Model Id " />
+                android:text="Device ModeLId " />
 
             <Button
                 android:id="@+id/GET_DOOR_LOCK_ID"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Get Door Lock Id" />
+                android:text="Door LockId" />
 
 
         </LinearLayout>
@@ -738,7 +1008,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Get Device Info " />
+                android:text="Device Info " />
 
         </LinearLayout>
 
@@ -747,7 +1017,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:gravity="center_horizontal"
-            android:text="AUDO SETTING MANAGEMENT"
+            android:text="Melody Management"
             android:textColor="@color/black"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -774,8 +1044,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="15dp"
                 android:layout_weight="1"
-
-                android:text="Set Audio Tone" />
+                android:text="Set AudioTone" />
 
 
         </LinearLayout>
@@ -802,7 +1071,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="15dp"
                 android:layout_weight="1"
-                android:text="Set Volume Level" />
+                android:text="Set VolumeLevel" />
 
 
         </LinearLayout>
@@ -815,16 +1084,16 @@
 
             <Button
                 android:id="@+id/Play_Melody_list"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Play Melody List" />
+                android:text="Play MelodyList" />
 
             <Button
                 android:id="@+id/Play_Melody"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
@@ -840,21 +1109,23 @@
 
             <Button
                 android:id="@+id/INC_VOLUME_LEVEL"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
+                android:layout_gravity="center_horizontal|center_vertical"
                 android:text="Increment Volume " />
 
             <Button
                 android:id="@+id/DEC_VOLUME_LEVEL"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_marginBottom="15dp"
                 android:layout_weight="1"
+                android:layout_gravity="center_horizontal|center_vertical"
                 android:text="Decrement Volume" />
 
         </LinearLayout>
@@ -871,7 +1142,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Next Audio Tone" />
+                android:text="Next AudioTone" />
 
             <Button
                 android:id="@+id/bt_PreviousAudioTone"
@@ -880,7 +1151,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Previous Audio Tone" />
+                android:text="Previous AudioTone" />
 
         </LinearLayout>
 
@@ -896,7 +1167,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="15dp"
                 android:layout_weight="2"
-                android:hint="Preview Audio tone ID"
+                android:hint="Preview Audio Tone ID"
                 android:phoneNumber="true" />
 
             <Button
@@ -906,7 +1177,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Preview Audio Tone Id" />
+                android:text="Preview AudioToneId" />
 
         </LinearLayout>
 
@@ -922,7 +1193,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Current Audio Tone Id" />
+                android:text="Current AudioToneId" />
 
             <Button
                 android:id="@+id/GET_VOLUME_LEVEL"
@@ -931,7 +1202,7 @@
                 android:layout_margin="5dp"
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
-                android:text="Get Volume Level" />
+                android:text="Volume Level" />
 
 
         </LinearLayout>
@@ -949,7 +1220,7 @@
                 android:layout_marginTop="10dp"
                 android:layout_weight="1"
                 android:backgroundTint="#E91E63"
-                android:text="Stop Audio Tone" />
+                android:text="Stop AudioTone" />
 
             <Button
                 android:id="@+id/GET_AUDIO_TONE"

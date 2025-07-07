@@ -1,4 +1,5 @@
 package com.remoteringer.utils;
+
 import android.content.Context;
 import android.util.Log;
 
@@ -26,7 +27,8 @@ public class JsonReader {
 
             // Parse JSON
             Gson gson = new Gson();
-            Type type = new TypeToken<Map<String, List<Tone>>>() {}.getType();
+            Type type = new TypeToken<Map<String, List<Tone>>>() {
+            }.getType();
             Map<String, List<Tone>> dataMap = gson.fromJson(json, type);
 
             // Extract list

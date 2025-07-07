@@ -1,18 +1,26 @@
 package com.remoteringer;
 
+import static com.remoteringer.Constant.Constant_Variable.isTriggerd;
+import static com.remoteringer.handlers.BleResponseHandler.OtaChecksStatus;
+
+
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
+import android.widget.Toast;
 
+import com.remoteringer.Constant.Constant_Variable;
 import com.remoteringer.callbacks.RingerCallbacks;
+import com.remoteringer.handlers.BleResponseHandler;
 import com.remoteringer.manager.BluetoothManager;
 import com.remoteringer.manager.DeviceSettingsManager;
 import com.remoteringer.manager.RingerSdkManager_ApiKey;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * The main SDK class for RemoteRinger functionality.
@@ -24,13 +32,13 @@ import java.util.List;
  * </p>
  */
 public class RemoteRingerSDK {
+    private static final String TAG = "RemoteRingerSdk";
     Activity activity;
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothLeScanner bluetoothLeScanner;
     private BluetoothManager bluetoothManager;
     private DeviceSettingsManager deviceSettingsManager;
     private RingerSdkManager_ApiKey sdkManager_apiKey;
-    private static final String TAG = "RemoteRingerSdk";
 
     /**
      * Constructs a new RemoteRingerSDK instance.
@@ -47,7 +55,6 @@ public class RemoteRingerSDK {
             this.sdkManager_apiKey = RingerSdkManager_ApiKey.initialize(activity, apiKey);
             this.bluetoothManager = BluetoothManager.getInstance(activity);
 
-
             // ✅ Use singleton instead of creating a new instance
             this.deviceSettingsManager = DeviceSettingsManager.getInstance(activity, bluetoothManager, activity);
         } catch (IllegalStateException e) {
@@ -57,6 +64,50 @@ public class RemoteRingerSDK {
         this.bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
     }
 
+    /**
+     * Sends a sendOtaControlCommandRequest command to the connected device.
+     *
+     * @param command,OtaCallback & The callback for success/error response.
+     */
+    public static void sendOtaControlCommandRequest(byte[] command, RingerCallbacks.OtaCallback callback) {
+        DeviceSettingsManager.sendOtaControlCommandRequest(command, callback);
+    }
+
+    /**
+     * Sends a sendOtaControlChecksumRequest command to the connected device.
+     *
+     * @param command,OtaCallback & The callback for success/error response.
+     */
+    public static void sendOtaControlChecksumRequest(byte[] command, RingerCallbacks.OtaCallback callback) {
+        DeviceSettingsManager.sendOtaControlChecksumRequest(command, callback);
+    }
+
+    /**
+     * Sends a sendOtaControlChecksumDone command to the connected device.
+     *
+     * @param command,OtaCallback & The callback for success/error response.
+     */
+    public static void sendOtaControlChecksumDone(byte[] command, RingerCallbacks.OtaCallback callback) {
+        DeviceSettingsManager.sendOtaControlChecksumDone(command, callback);
+    }
+
+    /**
+     * Sends a sendOtaControlDone command to the connected device.
+     *
+     * @param command,OtaCallback & The callback for success/error response.
+     */
+    public static void sendOtaControlDone(byte[] command, RingerCallbacks.OtaCallback callback) {
+        DeviceSettingsManager.sendOtaControlDone(command, callback);
+    }
+
+    /**
+     * Sends a sendOtaActionControlChecksumCheck command to the connected device.
+     *
+     * @param checkSum & The callback for success/error response.
+     */
+    public static void sendOtaActionControlChecksumCheck(byte[] checkSum, RingerCallbacks.OtaCallback callback) {
+        DeviceSettingsManager.sendOtaActionControlChecksumCheck(checkSum, callback);
+    }
 
     /**
      * Scans for nearby RemoteRinger BLE devices.
@@ -73,8 +124,8 @@ public class RemoteRingerSDK {
      * @param deviceAddress The deviceAddress of the device to connect to
      * @param callback      The callback for connection status updates
      */
-    public void RemoteRinger_ConnectDevice(String deviceAddress, RingerCallbacks.RingerDeviceCallback callback) {
-        bluetoothManager.connectToDevice(deviceAddress, callback);
+    public void RemoteRinger_ConnectDevice(String deviceAddress,String secretKey, RingerCallbacks.RingerDeviceCallback callback) {
+        bluetoothManager.connectToDevice(deviceAddress, secretKey,callback);
     }
 
     /**
@@ -85,6 +136,16 @@ public class RemoteRingerSDK {
      */
     public void RemoteRinger_Authentication(String ringerSerialNo, RingerCallbacks.AuthenticationCallback callback) {
         deviceSettingsManager.RemoteRinger_Authentication(ringerSerialNo, callback);
+    }
+
+    /**
+     * Authenticates with the connected RemoteRinger device.
+     *
+     * @param SecretKey The serial number for authentication
+     * @param callback       The callback for authentication result
+     */
+    public void RemoteRinger_SecretKey(String SecretKey, RingerCallbacks.AuthenticationCallback callback) {
+        deviceSettingsManager.RemoteRinger_SecretKey(SecretKey, callback);
     }
 
     /**
@@ -100,11 +161,12 @@ public class RemoteRingerSDK {
     /**
      * Sets the system mode on the connected device.
      *
-     * @param callback   The callback for operation result
+     * @param callback The callback for operation result
      */
-    public void RemoteRinger_SkipProvision( RingerCallbacks.SkipProvisionCallBack callback) {
-        deviceSettingsManager.RemoteRinger_SkipProvision( callback);
-    }
+    /*public void RemoteRinger_SkipProvision(RingerCallbacks.SkipProvisionCallBack callback) {
+        deviceSettingsManager.RemoteRinger_SkipProvision(callback);
+    }*/
+
     /**
      * Provisions WiFi settings on the connected device.
      *
@@ -112,11 +174,9 @@ public class RemoteRingerSDK {
      * @param password The WiFi password to provision
      * @param callback The callback for operation result
      */
-    public void RemoteRinger_ReProvision(String ssid, String password, RingerCallbacks.ReProvisionCallBack callback) {
+    public void RemoteRinger_ReProvision(String ssid, String password, RingerCallbacks.ProvisionCallback callback) {
         deviceSettingsManager.RemoteRinger_ReProvision(ssid, password, callback);
     }
-
-
 
     /**
      * Alternative method to set system mode (variant 1).
@@ -127,7 +187,8 @@ public class RemoteRingerSDK {
     public void RemoteRinger_setSystemMode1(int systemMode, RingerCallbacks.SystemModeCallback callback) {
         deviceSettingsManager.RemoteRinger_setSystemMode1(systemMode, callback);
     }
-    public void RemoteRinger_deviceCommissioning( RingerCallbacks.SystemModeCallback callback) {
+
+    public void RemoteRinger_deviceCommissioning(RingerCallbacks.SystemModeCallback callback) {
         deviceSettingsManager.RemoteRinger_deviceCommissioning(callback);
     }
 
@@ -166,8 +227,17 @@ public class RemoteRingerSDK {
      * @param wifiActivationMode The activation mode to set
      * @param callback           The callback for operation result
      */
-    public void RemoteRinger_wifiActivation(int wifiActivationMode, RingerCallbacks.WifiActivationCallback callback) {
-        deviceSettingsManager.RemoteRinger_wifiActivation(wifiActivationMode, callback);
+    public void RemoteRinger_wifiActivation(int wifiActivationMode,int onProvisioningType, RingerCallbacks.WifiActivationCallback callback) {
+        deviceSettingsManager.RemoteRinger_wifiActivation(wifiActivationMode,onProvisioningType, callback);
+    }
+
+    /**
+     * Activates WiFi on the connected device.
+     *
+     * @param callback           The callback for operation result
+     */
+    public void RemoteRinger_AbortProvisioning(RingerCallbacks.WifiActivationCallback callback) {
+        deviceSettingsManager.RemoteRinger_AbortProvisioning(callback);
     }
 
     /**
@@ -270,6 +340,15 @@ public class RemoteRingerSDK {
     }
 
     /**
+     * Sets the onboarding activation abort mode on the connected device.
+     *
+     * @param callback       The callback for operation result
+     */
+    public void RemoteRinger_AbortOnBoarding(RingerCallbacks.OnBoardingActivationCallback callback) {
+        deviceSettingsManager.RemoteRinger_AbortOnBoarding(callback);
+    }
+
+    /**
      * Sets the door lock encryption key on the connected device.
      *
      * @param doorLockEncryptionKey The encryption key to set
@@ -356,7 +435,7 @@ public class RemoteRingerSDK {
      * Previews a specific melody audio tone on the connected device.
      *
      * @param melodyId The tone ID to preview
-     * @param callback               The callback for operation result
+     * @param callback The callback for operation result
      */
     public void RemoteRinger_PreviewMelodyAudioTone(Integer melodyId, RingerCallbacks.VolumeCallback callback) {
         deviceSettingsManager.RemoteRinger_PreviewMelodyAudioTone(melodyId, callback);
@@ -392,7 +471,6 @@ public class RemoteRingerSDK {
     /**
      * Plays a specific melody on the connected device.
      *
-     * @param melodyId The ID of the melody to play
      * @param callback The callback for operation result
      */
     public void RemoteRinger_PlayMelody(RingerCallbacks.PlayMelodyCallback callback) {
@@ -403,7 +481,7 @@ public class RemoteRingerSDK {
      * Sets the audio tone on the connected device.
      *
      * @param melodyId The tone ID to set
-     * @param callback  The callback for operation result
+     * @param callback The callback for operation result
      */
     public void RemoteRinger_SetMelody(int melodyId, RingerCallbacks.PlayMelodyCallback callback) {
         deviceSettingsManager.RemoteRinger_SetMelody(melodyId, callback);
@@ -497,10 +575,10 @@ public class RemoteRingerSDK {
     /**
      * Performs device onboarding with the specified parameters.
      *
-     * @param doorLockId    The door lock ID to set
-     * @param encryptionKey The encryption key to set
-     * @param doorLockbleMacId      The BLE MAC ID to set
-     * @param callback      The callback for operation result
+     * @param doorLockId       The door lock ID to set
+     * @param encryptionKey    The encryption key to set
+     * @param doorLockbleMacId The BLE MAC ID to set
+     * @param callback         The callback for operation result
      */
     public void RemoteRinger_Onboarding(String doorLockId, String encryptionKey, String doorLockbleMacId, int doorLockUnitType, RingerCallbacks.OnboardingCallback callback) {
         deviceSettingsManager.RemoteRinger_Onboarding(doorLockId, encryptionKey, doorLockbleMacId, doorLockUnitType, callback);
@@ -521,7 +599,7 @@ public class RemoteRingerSDK {
      *
      * @param callback The callback for session management events
      */
-    public void initializeAndManageSession(final RingerCallbacks.SessionCallback callback) {
+    public void initializeAndManageSession(String secretKey,final RingerCallbacks.SessionCallback callback) {
         try {
             sdkManager_apiKey = RingerSdkManager_ApiKey.getInstance();
         } catch (IllegalStateException e) {
@@ -534,7 +612,7 @@ public class RemoteRingerSDK {
         List<String> lastDevices = sdkManager_apiKey.getActiveDevices();
         callback.onLastConnectedDevices(lastDevices);
 
-        if (activeDevice != null && !activeDevice.isEmpty()) {
+        /*if (activeDevice != null && !activeDevice.isEmpty()) {
             Log.d(TAG, "Attempting to reconnect to active device: " + activeDevice);
             bluetoothManager.connectToDevice(activeDevice, new RingerCallbacks.RingerDeviceCallback() {
                 @Override
@@ -591,7 +669,85 @@ public class RemoteRingerSDK {
         } else {
             Log.d(TAG, "No previously connected devices found.");
             callback.onError("No previous devices found.");
+        }*/
+
+        if (activeDevice != null && !activeDevice.isEmpty()) {
+            Log.d(TAG, "Attempting to reconnect to active device: " + activeDevice);
+            bluetoothManager.connectToDevice(activeDevice,secretKey, new RingerCallbacks.RingerDeviceCallback() {
+                @Override
+                public void onSuccess(String message) {
+                    Log.d(TAG, "Reconnected successfully to " + activeDevice);
+                    callback.onDeviceConnected(activeDevice);
+
+                }
+
+                @Override
+                public void onError(String errorMessage) {
+                    Log.e(TAG, "Reconnection failed for active device " + activeDevice + ": " + errorMessage);
+                    sdkManager_apiKey.removeConnectedDevice(activeDevice);
+
+                    for (String backupDevice : lastDevices) {
+                        if (!backupDevice.equals(activeDevice)) {
+                            Log.d(TAG, "Trying backup reconnection to: " + backupDevice);
+                            bluetoothManager.connectToDevice(backupDevice,secretKey, new RingerCallbacks.RingerDeviceCallback() {
+                                @Override
+                                public void onSuccess(String message) {
+                                    Log.d(TAG, "Reconnected successfully to backup device " + backupDevice);
+                                    sdkManager_apiKey.setActiveDevice(backupDevice);
+                                    callback.onDeviceConnected(backupDevice);
+                                }
+
+                                @Override
+                                public void onError(String errorMessage) {
+                                    Log.e(TAG, "Backup reconnection failed: " + errorMessage);
+                                    callback.onError("Failed to reconnect to any device.");
+                                }
+
+                                @Override
+                                public void onDeviceDataReceived(Map<String, String> dataMap) {
+                                    commonEventNotification(dataMap);
+                                }
+                            });
+                            return;
+                        }
+                    }
+                    callback.onError("Failed to reconnect to any device.");
+                }
+
+                @Override
+                public void onDeviceDataReceived(Map<String, String> dataMap) {
+                    commonEventNotification(dataMap);
+                }
+            });
+        } else if (!lastDevices.isEmpty()) {
+            String reconnectDevice = lastDevices.get(0);
+            Log.d(TAG, "No active device found. Attempting to reconnect to: " + reconnectDevice);
+            bluetoothManager.connectToDevice(reconnectDevice,secretKey, new RingerCallbacks.RingerDeviceCallback() {
+                @Override
+                public void onSuccess(String message) {
+                    Log.d(TAG, "Reconnected successfully to " + reconnectDevice);
+                    sdkManager_apiKey.setActiveDevice(reconnectDevice);
+                    callback.onDeviceConnected(reconnectDevice);
+                }
+
+                @Override
+                public void onError(String errorMessage) {
+                    Log.e(TAG, "Reconnection failed for " + reconnectDevice + ": " + errorMessage);
+                    callback.onError("Failed to reconnect to any device.");
+                }
+
+                @Override
+                public void onDeviceDataReceived(Map<String, String> dataMap) {
+                    commonEventNotification(dataMap);
+                }
+
+            });
+        } else {
+            Log.d(TAG, "No previously connected devices found.");
+            callback.onError("No previous devices found.");
         }
+
+
     }
 
     /**
@@ -604,77 +760,108 @@ public class RemoteRingerSDK {
     }
 
     /**
-     * Sends a sendOtaControlCommandRequest command to the connected device.
-     *
-     * @param command,OtaCallback & The callback for success/error response.
-     */
-    public static void sendOtaControlCommandRequest(byte[] command, RingerCallbacks.OtaCallback callback) {
-        DeviceSettingsManager.sendOtaControlCommandRequest(command, callback);
-    }
-
-    /**
-     * Sends a sendOtaControlChecksumRequest command to the connected device.
-     *
-     * @param command,OtaCallback & The callback for success/error response.
-     */
-    public static void sendOtaControlChecksumRequest(byte[] command, RingerCallbacks.OtaCallback callback) {
-        DeviceSettingsManager.sendOtaControlChecksumRequest(command, callback);
-    }
-
-    /**
-     * Sends a sendOtaControlChecksumDone command to the connected device.
-     *
-     * @param command,OtaCallback & The callback for success/error response.
-     */
-    public static void sendOtaControlChecksumDone(byte[] command, RingerCallbacks.OtaCallback callback) {
-        DeviceSettingsManager.sendOtaControlChecksumDone(command, callback);
-    }
-
-    /**
-     * Sends a sendOtaControlDone command to the connected device.
-     *
-     * @param command,OtaCallback & The callback for success/error response.
-     */
-    public static void sendOtaControlDone(byte[] command, RingerCallbacks.OtaCallback callback) {
-        DeviceSettingsManager.sendOtaControlDone(command, callback);
-    }
-
-
-    /**
      * Sends a RemoteRinger_StartOtaUpdate command to the connected device.
      *
      * @param fileUri,data,chunkSize & The callback for success/error response.
      */
 
-    public void RemoteRinger_StartOtaUpdate( Uri fileUri, RingerCallbacks.OtaProgressCallback callback) {
-        deviceSettingsManager.RemoteRinger_StartOtaUpdate( fileUri, callback);
+    public void RemoteRinger_StartOtaUpdate(Uri fileUri, RingerCallbacks.OtaProgressCallback callback) {
+        deviceSettingsManager.RemoteRinger_StartOtaUpdate(fileUri, callback);
     }
-    /*public static void RemoteRinger_StartOtaUpdate(byte[] firmWareData, int chunkSize, RingerCallbacks.OtaProgressCallback callback) {
-        DeviceSettingsManager.RemoteRinger_StartOtaUpdate(firmWareData,chunkSize,callback);
-    }*/
 
     /**
-     * Sends a sendOtaActionControlChecksumCheck command to the connected device.
+     * Sends a RemoteRinger_WifiRssValueUpdate command to the connected device.
      *
-     * @param sendOtaActionControlChecksumCheck  & The callback for success/error response.
+     * @param callback value & The callback for success/error response.
      */
-    public static void sendOtaActionControlChecksumCheck(byte[] checkSum, RingerCallbacks.OtaCallback callback) {
-        DeviceSettingsManager.sendOtaActionControlChecksumCheck(checkSum, callback);
+
+    public void RemoteRinger_GetWifiRssi(RingerCallbacks.WifiRssiCallBack callback) {
+        deviceSettingsManager.RemoteRinger_WifiRssValue(callback);
     }
+
+    /**
+     * Sends a RemoteRinger_WifiRouterStatus command to the connected device.
+     *
+     * @param callback value & The callback for success/error response.
+     */
+
+    public void RemoteRinger_GetWifiStatus(RingerCallbacks.WifiStatusCallBack callback) {
+        deviceSettingsManager.RemoteRinger_WifiRouterStatus(callback);
+    }
+
+    /**
+     * Sends a RemoteRinger_BleRouterStatus command to the connected device.
+     *
+     * @param callback value & The callback for success/error response.
+     */
+
+    public void RemoteRinger_GetDluBleStatus(RingerCallbacks.DluBleStatusCallBack callback) {
+        deviceSettingsManager.RemoteRinger_BleRouterStatus(callback);
+    }
+
+    /**
+     * Sends a RemoteRinger_DluUdpStatus command to the connected device.
+     *
+     * @param callback value & The callback for success/error response.
+     */
+
+    public void RemoteRinger_GetDluUdpStatus(RingerCallbacks.DluUdpStatusCallBack callback) {
+        deviceSettingsManager.RemoteRinger_GetUdpStatus(callback);
+    }
+
+
+    /**
+     * Sends a RemoteRinger_BleRssValue command to the connected device.
+     *
+     * @param callback value & The callback for success/error response.
+     */
+    public void RemoteRinger_GetDluBleRssi(RingerCallbacks.DluBleRssiCallBack callback) {
+        deviceSettingsManager.RemoteRinger_BleRssValue(callback);
+    }
+
+
 
     /**
      * Sends a RemoteRinger_AbortOtaUpdate command to the connected device.
      *
-     * @param RemoteRinger_AbortOtaUpdate  & The callback for success/error response.
+     * @param callback & The callback for success/error response.
      */
 
     public void RemoteRinger_AbortOtaUpdate(RingerCallbacks.OtaCallback callback) {
-        DeviceSettingsManager.getInstance(activity, bluetoothManager, activity).abortOtaUpdate();
-        callback.onSuccess("OTA aborted successfully.");
+        if(!OtaChecksStatus){
+            callback.onError("Ota is not started");
+        }else {
+            DeviceSettingsManager.getInstance(activity, bluetoothManager, activity).abortOtaUpdate();
+            callback.onSuccess("OTA aborted successfully.");
+            OtaChecksStatus=false;
+            BleResponseHandler.cancelTimeout();
+            Constant_Variable.getProvisionState = 0;
+            Constant_Variable.getOnboardingState = 0;
+            isTriggerd=0;
+        }
+
     }
 
     public void RemoteRinger_playMelodyList(Context context, RingerCallbacks.ToneCallback callback) {
-        deviceSettingsManager.RemoteRinger_playMelodyList(context,callback);
+        deviceSettingsManager.RemoteRinger_playMelodyList(context, callback);
     }
+
+    public void commonEventNotification(Map<String, String> dataMap) {
+        String eventValue = dataMap.get("Current Tone");
+        String volumeValue = dataMap.get("Volume Level");
+        String currentStates = dataMap.get("Current State");
+
+        if (eventValue != null && !eventValue.isEmpty()) {
+            Toast.makeText(activity, "Current Tone: " + eventValue, Toast.LENGTH_SHORT).show();
+        }
+
+        if (volumeValue != null && !volumeValue.isEmpty()) {
+            Toast.makeText(activity, "Volume Level: " + volumeValue, Toast.LENGTH_SHORT).show();
+        }
+        if (currentStates != null && !currentStates.isEmpty()) {
+            Toast.makeText(activity, "Current State " + currentStates, Toast.LENGTH_SHORT).show();
+        }
+    }
+
 
 }

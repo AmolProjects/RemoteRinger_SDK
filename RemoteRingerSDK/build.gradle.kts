@@ -16,10 +16,10 @@ android {
 //
     defaultConfig {
       applicationId = "com.remoteringer"
-        minSdk = 29
+        minSdk = 26
         targetSdk = 35
-       versionCode = 2
-      versionName = "1.0.0"
+       versionCode = 3
+      versionName = "3.0.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

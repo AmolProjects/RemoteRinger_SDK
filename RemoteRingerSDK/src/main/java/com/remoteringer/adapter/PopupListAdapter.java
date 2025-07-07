@@ -1,4 +1,5 @@
 package com.remoteringer.adapter;
+
 import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -16,6 +17,7 @@ public class PopupListAdapter extends ArrayAdapter<Tone> {
     public PopupListAdapter(Context context, List<Tone> tones) {
         super(context, 0, tones);
     }
+
     @NonNull
     @Override
     public View getView(int position, View convertView, @NonNull ViewGroup parent) {
